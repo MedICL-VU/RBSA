@@ -1,0 +1,53 @@
+#include "BinaryImageMorphology.h"
+
+
+UCharImageType::Pointer DilateImage
+(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
+ UCharImageType::PixelType value)
+{
+  auto filter = BinaryDilateImageFilterType::New();
+  filter->SetInput(image);
+  filter->SetKernel(kernel);
+  filter->SetDilateValue(value);
+  filter->Update();
+
+  return filter->GetOutput();
+}
+
+
+UCharImageType::Pointer ErodeImage
+(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
+ UCharImageType::PixelType value)
+{
+  auto filter = BinaryErodeImageFilterType::New();
+  filter->SetInput(image);
+  filter->SetKernel(kernel);
+  filter->SetErodeValue(value);
+  filter->Update();
+
+  return filter->GetOutput();
+}
+
+
+UCharImageType::Pointer LocalizedAtrophy
+(UCharImageType::Pointer targetLabel, UCharImageType::Pointer referenceAdjacentLabel)
+{
+  // Set up kernel
+  BinaryBallStructuringElementType kernel;
+  kernel.SetRadius(kernelRadius);
+  kernel.CreateStructuringElement();
+
+  // Initial morphology operations
+  UCharImageType::Pointer erodeMask = ErodeImage(targetLabel, kernel);
+  UCharImageType::Pointer dilateMask = DilateImage(referenceAdjacentLabel, kernel);
+
+  // Get final mask
+  UCharImageType::Pointer image;
+  image = SubtractImages<UCharImageType, UCharImageType, UCharImageType>(targetLabel, erodeMask);
+  image = MultiplyImages<UCharImageType, UCharImageType, UCharImageType>(image, dilateMask);
+  image = AddImages<UCharImageType, UCharImageType, UCharImageType>(image, erodeMask);
+
+  UCharImageType::Pointer output =
+    BinaryThresholdImage<UCharImageType, UCharImageType>(image, 1, 1);
+  return output;
+}

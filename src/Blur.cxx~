@@ -1,0 +1,172 @@
+#include "Blur.h"
+#include "utils.h"
+
+UCharImageType::Pointer BinaryContourImage(UCharImageType::Pointer image)
+{
+  auto filter = BinaryContourImageFilterType::New();
+  filter->SetInput(image);
+  filter->SetForegroundValue(0);
+  filter->SetBackgroundValue(1);
+  filter->Update();
+
+  return filter->GetOutput();
+}
+
+
+float GetMaximumImageValue(FloatImageType::Pointer image)
+{
+  auto filter = MinimumMaximumImageCalculatorType::New();
+  filter->SetImage(image);
+  filter->Compute();
+
+  return filter->GetMaximum();
+}
+
+
+vtkSmartPointer<vtkPolyData> BinaryITKImageToVTKMesh
+(UCharImageType::Pointer itkTargetImage, UCharImageType::Pointer edgeMap)
+{
+  // Get info from itk image
+  const auto& region = itkTargetImage->GetLargestPossibleRegion();
+  const auto& size = region.GetSize();
+  const auto& spacing = itkTargetImage->GetSpacing();
+  const auto& origin = itkTargetImage->GetOrigin();
+
+  // Create and allocate vtk image
+  auto vtkTargetImage = vtkSmartPointer<vtkImageData>::New();
+  vtkTargetImage->SetDimensions(size[0], size[1], size[2]);
+  vtkTargetImage->SetSpacing(spacing[0], spacing[1], spacing[2]);
+  vtkTargetImage->SetOrigin(origin[0], origin[1], origin[2]);
+  vtkTargetImage->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
+
+  // Copy voxel data
+  for(unsigned int k = 0; k < size[2]; k++) {
+    for(unsigned int j = 0; j < size[1]; j++) {
+      for(unsigned int i = 0; i < size[0]; i++) {
+	UCharImageType::IndexType idx = {i, j, k};
+	const unsigned char& value = itkTargetImage->GetPixel(idx);
+	unsigned char* voxel =
+	  static_cast<unsigned char*>(vtkTargetImage->GetScalarPointer(i, j, k));
+	*voxel = value;
+      }
+    }
+  }
+  vtkTargetImage->Modified();
+
+  // Generate mesh from vtkImage
+  auto marchingCubesFilter = vtkSmartPointer<vtkMarchingCubes>::New();
+  marchingCubesFilter->SetInputData(vtkTargetImage);
+  marchingCubesFilter->ComputeNormalsOn();
+  marchingCubesFilter->SetValue(0, 0.5);
+  marchingCubesFilter->Update();
+  
+  vtkSmartPointer<vtkPolyData> mesh = marchingCubesFilter->GetOutput();
+  
+  // Transform mesh back to itkTargetImage space
+  auto direction = itkTargetImage->GetDirection();
+  auto directionInv = direction.GetInverse();
+
+  for(unsigned int p = 0; p < mesh->GetNumberOfPoints(); p++) {
+    // Get point and shift origin
+    double vtkPoint[nDims];
+    mesh->GetPoint(p, vtkPoint);
+    for(unsigned int d = 0; d < nDims; d++) {
+      vtkPoint[d] -= origin[d];
+    }
+
+    // Multiply coords w/ inverse direction matrix   
+    double itkPoint[nDims];
+    for(unsigned int i = 0; i < nDims; i++) {
+      itkPoint[i] = 0;
+      for(unsigned int j = 0; j < nDims; j++) {
+	itkPoint[i] += directionInv[i][j] * vtkPoint[j];
+      }
+    }
+	  
+    // Update coords
+    double vtkPointNew[nDims];
+    for(unsigned int d = 0; d < nDims; d++) {
+      vtkPointNew[d] = itkPoint[d];
+    }
+    mesh->GetPoints()->SetPoint(p, vtkPointNew);
+  }
+  mesh->BuildLinks();
+
+  // Create a dilated mask for the outer (CSF) edge of the mesh
+  BinaryBallStructuringElementType kernel;
+  kernel.SetRadius(kernelRadius);
+  kernel.CreateStructuringElement();
+
+  UCharImageType::Pointer mask = DilateImage(edgeMap, kernel);
+  mask = SubtractImages<UCharImageType, UCharImageType, UCharImageType>(itkTargetImage, edgeMap);
+  mask = BinaryThresholdImage<UCharImageType, UCharImageType>(mask, 1, 1);
+  mask = AddImages<UCharImageType, UCharImageType, UCharImageType>(mask, edgeMap);
+
+  // Add labels to mesh denoted if edge
+  vtkNew<vtkFloatArray> isEdge;
+  isEdge->SetNumberOfComponents(1);
+  isEdge->SetNumberOfValues(mesh->GetNumberOfPoints());
+  isEdge->SetName("Is edge");
+
+  auto maskInterpolator = LinearInterpolateUCharImageFunctionType::New();
+  itk::ContinuousIndex<double,nDims> x0;
+  UCharImageType::IndexType idx;
+  
+  for(unsigned int p = 0; p < mesh->GetNumberOfPoints(); p++) {
+    // Get coords as itkContinuousIndex
+    double p0[nDims];
+    mesh->GetPoint(p, p0);
+
+    for(unsigned int d = 0; d < nDims; d++) {
+      x0[d] = p0[d];
+    }
+
+    // Get value from mask image
+    int isInside = mask->TransformPhysicalPointToIndex(x0, idx);
+    if(isInside) {
+      // x = mask->GetPixel(x0);
+      //isEdge->SetValue(p, x);
+    }
+    else {
+      std::cerr << "huh, index is not inside\n";
+    }
+  }
+  mesh->GetPointData()->AddArray(isEdge);
+  mesh->BuildLinks();
+  
+  return mesh;
+}
+			       
+
+FloatImageType::Pointer SignedDistanceTransform(UCharImageType::Pointer image) {
+  auto filter = SignedMaurerDistanceMapImageFilterType::New();
+  filter->SetInput(image);
+  filter->Update();
+
+  return filter->GetOutput();
+}
+
+
+UCharImageType::Pointer GetBlurMask
+(UCharImageType::Pointer labelMask, UCharImageType::Pointer brainMask,
+ UCharImageType::Pointer skullStripMask, float stepSize = 0.4)
+{
+  // Extract edge of labelMask that is bordering CSF
+  UCharImageType::Pointer brainMaskEdgeMap = BinaryContourImage(brainMask);
+  UCharImageType::Pointer labelOuterEdgeMap =
+    MultiplyImages<UCharImageType, UCharImageType, UCharImageType>(brainMaskEdgeMap, labelMask);
+
+  // Convert edge map to vtkPolyData (to get a set of points and normals on edge)
+  vtkSmartPointer<vtkPolyData> edge = BinaryITKImageToVTKMesh(labelMask, labelOuterEdgeMap);
+  
+  
+
+
+
+  // Get distance map of brainMask
+  FloatImageType::Pointer distanceMap = SignedDistanceTransform(brainMask);
+
+  
+  
+  
+}
