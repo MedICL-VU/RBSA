@@ -1,3 +1,5 @@
+[![DOI](https://doi.org/10.3389/fnimg.2022.861687](https://doi.org/10.3389/fnimg.2022.861687)
+
 # Registration-Based Synthetic Atrophy (RBSA): Synthetic Atrophy for Longitudinal Cortical Surfaces
 
 ## Overview
@@ -29,5 +31,4 @@ This repository contains a Registration-based tool for inducing ground truth, sy
 
 If you use this tool, please cite the original paper:
 
-Synthetic Atrophy for Longitudinal Cortical Surface Analyses, K. E. Larson, I. Oguz. Frontiers in Neuroimaging, 2022.
-https://doi.org/10.3389/fnimg.2022.861687
+Synthetic Atrophy for Longitudinal Cortical Surface Analyses, K. E. Larson, I. Oguz. Frontiers in Neuroimaging, 2022. https://doi.org/10.3389/fnimg.2022.861687
