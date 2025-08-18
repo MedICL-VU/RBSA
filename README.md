@@ -12,7 +12,7 @@ This repository contains a Registration-based tool for inducing ground truth, sy
 
 ```math
 \textrm{MSDD}_{\textrm{label}} =
-\frac{1}{2}( \textrm{GM}_{\textrm{orig}\rightarrow\textrm{atrophy}} + )
+\frac{1}{2}( \textrm{GM}_{\textrm{orig}\rightarrow\textrm{atrophy}} + \textrm{GM}_{\textrm{atrophy}\rightarrow\textrm{orig}} )
 ```
 
 
