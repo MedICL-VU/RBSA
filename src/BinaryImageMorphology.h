@@ -30,10 +30,14 @@ UCharImageType::Pointer ErodeImage
 (UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
  UCharImageType::PixelType value = 1);
 
-UCharImageType::Pointer DilateErodeCorrection
-(UCharImageType::Pointer image, UCharImageType::PixelType value = 1);
+UCharImageType::Pointer DilateErodeCorrection(UCharImageType::Pointer image);
 
 UCharImageType::Pointer LocalizedAtrophy
-(UCharImageType::Pointer targetLabel, UCharImageType::Pointer referenceAdjacentLabel);
+(UCharImageType::Pointer targetLabel, UCharImageType::Pointer referenceAdjacentLabel,
+ unsigned int nIters);
+
+UCharImageType::Pointer ReplaceLabelInImage
+(UCharImageType::Pointer inputImage, UCharImageType::Pointer origLabelMask,
+ UCharImageType::Pointer atrophyLabelMask);
 
 #endif
