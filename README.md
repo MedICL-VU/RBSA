@@ -1,5 +1,3 @@
-[![DOI](https://doi.org/10.3389/fnimg.2022.861687](https://doi.org/10.3389/fnimg.2022.861687)
-
 # Registration-Based Synthetic Atrophy (RBSA): Synthetic Atrophy for Longitudinal Cortical Surfaces
 
 ## Overview
