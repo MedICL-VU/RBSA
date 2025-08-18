@@ -18,14 +18,11 @@ This repository contains a Registration-based tool for inducing ground truth, sy
 
 ## Dependencies
 
-- ITK:  
-  - https://itk.org/download/ 
+- ITK: https://itk.org/download/ 
   - version 4.13.2 recommended, as this is what I had access to when developing the new version... but feel free to let me know if it works with a more recent version
-- VTK:
-  - https://vtk.org/download/ 
+- VTK: https://vtk.org/download/ 
   - version 9.3.0 or later
-- FreeSurfer (optional)
-  - https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall
+- FreeSurfer (optional): https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall
   - Not required to run, but there is an option to run the pipeline in a way to easily interface with FreeSurfer's recon-all outputs instead of using user-provided paths for all inputs
 
 ## References
