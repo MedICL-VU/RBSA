@@ -1,27 +1,32 @@
-# Synthetic Atrophy for Longitudinal Cortical Surfaces
+# Registration-Based Synthetic Atrophy (RBSA): Synthetic Atrophy for Longitudinal Cortical Surfaces
 
-An example workflow for this pipeline is located in Synthetic-Atrophy_example.sh. To compile this repository and run the example, you will need to download the following external packages:
-- ITK:  https://itk.org/download/ (version 4.13.3 or later)
-- VTK:  https://vtk.org/download/ (version 7.11 or later)
-- c3d:  https://sourceforge.net/p/c3d/git/ci/master/tree/
-- Slicer:  https://download.slicer.org/
-- Greedy  https://sites.google.com/view/greedyreg/
-- ImageMath: https://github.com/NIRALUser/niral_utilities/tree/master/ImageMath
-- HoleDetection:  https://www.insight-journal.org/browse/publication/43 (click on "source code", then clone and compile")
-cd
-Once you download these tools, you'll need to update the appropriate paths in the CMakeLists.txt (ITK/VTK) and the example script (all others).
+## Overview
 
+This repository contains a Registration-based tool for inducing ground truth, synthetic gray matter (GM) atrophy in brain images and cortical surfaces. Given an input cortical label map, the RBSA pipeline performs the following steps to induce synthetic atrophy in a user-specified target label (or labels):
 
-Once the paths have been updated and you've compiled the library, you can just run the Synthetic-Atrophy_example.sh to generate example data. The code is set to only atrophy the left superior temporal gyrus (LSTG) ROI (line 229), which is the example used in the paper, but you can apply this to any ROI within any cortical parcellation. All the steps are contained in the function main():
-1. Set up paths/data and create masks for original timepoint
-2. Get high resolution, cropped patch surrounding ROI
-3. Induce atrophy and create masks for atrophy timepoint
-4. Apply atrophy transform to image data
-5. Create surface data for original/atrophy timepoints
-6. Measure thickness change in surface data
+1. Isolates the target GM label(s) from the input parcellation to create a mask for the original timepoint
+2. Performs a series of binary image morphology operations in each target label to create corresponding masks for the "atrophied" timepoint
+3. Registers the original masks to the "atrophied" masks to yield a displacement field that pushes the GM/CSF boundary inwards towards the WM. Individual fields are generated for each label and then combined to produce single, atrophy inducing transformation.
+4. Applies the transformation to any input images/surfaces.
+5. Calculates the ground truth, mean change induced within each target label, defined as the mean surface displacement difference (MSDD):
 
+$$ \textrm{MSDD} = \frac{1}{2}(\textrm{GM}_{\textrm{orig}\rightarrow\textrm{atrophy}})$$
 
-If you use this tool, please cite the paper:
+## Dependencies
+
+- ITK:  
+  - https://itk.org/download/ 
+  - version 4.13.2 recommended, as this is what I had access to when developing the new version... but feel free to let me know if it works with a more recent version
+- VTK:
+  - https://vtk.org/download/ 
+  - version 9.3.0 or later
+- FreeSurfer (optional)
+  - https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall
+  - Not required to run, but there is an option to run the pipeline in a way to easily interface with FreeSurfer's recon-all outputs instead of using user-provided paths for all inputs
+
+## References
+
+If you use this tool, please cite the original paper:
 
 Synthetic Atrophy for Longitudinal Cortical Surface Analyses, K. E. Larson, I. Oguz. Frontiers in Neuroimaging, 2022.
 https://doi.org/10.3389/fnimg.2022.861687
