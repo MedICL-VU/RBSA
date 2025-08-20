@@ -66,19 +66,27 @@ float GetMeanDistanceWithinLabel(vtkSmartPointer<vtkPolyData> surface, const int
 }
 
 
+UCharImageType::Pointer MakeBinaryMask
+(IntImageType::Pointer ref, const std::vector<int>& labels, UCharImageType::Pointer mask)
+{
+  if(!mask) {
+    mask = InitializeZeroFilledImage<IntImageType, UCharImageType>(ref);
+  }
+  for(const auto& label : labels) {
+    UCharImageType::Pointer temp = BinaryThresholdImage<IntImageType>(ref, label, label, 0, 1);
+    mask = AddImages<UCharImageType>(temp, mask);
+  }
+  mask = BinaryThresholdImage<UCharImageType>(mask, 1, 1, 0, 1);
+
+  return mask;
+}
+
+
 //-------------------------------------------------------------------------------------------------
 
 MSDD::MSDD()
 {
   this->m_defaultPixelValue = 1;
-
-  this->m_parc = nullptr;
-
-  this->m_lMaskGM = nullptr;
-  this->m_lMaskWM = nullptr;
-
-  this->m_rMaskGM = nullptr;
-  this->m_rMaskWM = nullptr;
 
   this->m_lGM0 = nullptr;
   this->m_lWM0 = nullptr;
@@ -90,6 +98,42 @@ MSDD::MSDD()
   this->m_rGM1 = nullptr;
   this->m_rWM1 = nullptr;
 };
+
+
+void MSDD::MakeHemiTemplates
+(IntImageType::Pointer mask, const std::vector<int>& lGMs, const std::vector<int>& lWMs,
+ const std::vector<int>& rGMs, const std::vector<int>& rWMs)
+{
+  // Left WM
+  this->m_lMaskWM = MakeBinaryMask(mask, lWMs);  
+  if(ImageSum<UCharImageType>(this->m_lMaskWM) == 0) {
+    std::cerr << "Error: input hemis template does not contain any provided labels for lh WM\n";
+    return;
+  }
+  
+  // Left GM
+  this->m_lMaskGM = DuplicateImage<UCharImageType>(this->m_lMaskWM);
+  this->m_lMaskGM =  MakeBinaryMask(mask, lGMs, this->m_lMaskGM);
+  if(ImageSum<UCharImageType>(this->m_lMaskGM) == 0) {
+    std::cerr << "Error: input hemis template does not contain any provided labels for lh GM\n";
+    return;
+  }
+
+  // Right WM
+  this->m_rMaskWM = MakeBinaryMask(mask, rWMs);
+  if(ImageSum<UCharImageType>(this->m_rMaskWM) == 0) {
+    std::cerr << "Error: input hemis template does not contain any provided labels for rh WM\n";
+    return;
+  }
+
+  // Left GM
+  this->m_rMaskGM = DuplicateImage<UCharImageType>(this->m_rMaskWM);
+  this->m_rMaskGM = MakeBinaryMask(mask, rGMs, this->m_rMaskGM);
+  if(ImageSum<UCharImageType>(this->m_rMaskGM) == 0) {
+    std::cerr << "Error: input hemis template does not contain any provided labels for rh GM\n";
+    return;
+  }
+}
 
 
 void MSDD::CreateCustomParcellation()
@@ -159,8 +203,8 @@ void MSDD::GenerateSurfaces()
     ParcellateSurface<IntImageType>(this->m_lGM0, this->m_parc, "TargetLabels", left);
     ParcellateSurface<IntImageType>(this->m_lWM0, this->m_parc, "TargetLabels", left);
 
-    this->m_lGM1 = WarpSurface(this->m_lGM0, this->m_warp, this->m_lMaskGM, false, false);
-    this->m_lWM1 = WarpSurface(this->m_lWM0, this->m_warp, this->m_lMaskWM, false, true);
+    this->m_lGM1 = WarpSurface(this->m_lGM0, this->m_warp, this->m_warpMask, false, false);
+    this->m_lWM1 = WarpSurface(this->m_lWM0, this->m_warp, this->m_warpMask, false, true);
 
     CalculateSurfaceDistance(this->m_lGM0, this->m_lGM1);
     CalculateSurfaceDistance(this->m_lGM1, this->m_lGM0);
@@ -179,8 +223,8 @@ void MSDD::GenerateSurfaces()
     ParcellateSurface<IntImageType>(this->m_rGM0, this->m_parc, "TargetLabels", right);
     ParcellateSurface<IntImageType>(this->m_rWM0, this->m_parc, "TargetLabels", right);
     
-    this->m_rGM1 = WarpSurface(this->m_rGM0, this->m_warp, this->m_rMaskGM, false, false);
-    this->m_rWM1 = WarpSurface(this->m_rWM0, this->m_warp, this->m_rMaskWM, false, true);
+    this->m_rGM1 = WarpSurface(this->m_rGM0, this->m_warp, this->m_warpMask, false, false);
+    this->m_rWM1 = WarpSurface(this->m_rWM0, this->m_warp, this->m_warpMask, false, true);
 
     CalculateSurfaceDistance(this->m_rGM0, this->m_rGM1);
     CalculateSurfaceDistance(this->m_rGM1, this->m_rGM0);
@@ -275,8 +319,6 @@ void MSDD::Write(const std::string& dirname)
   std::string msddFileName = dirname + "/msdd.txt";
   
   // Write surfaces
-  WriteImage<VectorImageType>(this->m_warp, warpFileName);
-
   if(this->m_lGM0) WritePolyData(this->m_lGM0, lGM0FileName);
   if(this->m_lWM0) WritePolyData(this->m_lWM0, lWM0FileName);
   if(this->m_lGM1) WritePolyData(this->m_lGM1, lGM1FileName);
