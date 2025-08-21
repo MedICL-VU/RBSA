@@ -1,0 +1,39 @@
+FS_mode:
+  subject_ids:
+  subjects_dir:
+
+Filenames:
+  parcellation: aparc+aseg.mgz
+  skullstrip: brainmask.mgz
+  hemis_template: ribbon.mgz
+  output_dir:
+  input_images:
+  - T1.mgz
+  - FLAIR.mgz
+  input_GMs:
+  - lh.pial
+  - rh.pial
+  input_WMs:
+  - lh.white
+  - rh.white
+  output_images:
+  output_GMs:
+  output_WMs:
+
+Labels:
+  atrophy_targets_labels_file:
+  atrophy_target_labels:
+  - 1030
+  - 2030
+  wm_labels:
+  - 2
+  - 41
+  lh_GM_template_labels: 3
+  lh_WM_template_labels: 2
+  rh_GM_template_labels: 42
+  rh_WM_template_labels: 41
+
+n_atrophy_iters: 1
+upsampling_factor: 1.0
+MSDD: true
+RAS: true

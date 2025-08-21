@@ -1,0 +1,34 @@
+Filenames:
+  parcellation: example_data/parcellation.nii.gz
+  skullstrip: example_data/skullstrip.nii.gz
+  hemis_template: example_data/hemis_template.nii.gz
+  output_dir: example_data/outputs
+  input_images:
+  - example_data/T1.nii.gz
+  - example_data/FLAIR.nii.gz
+  input_GMs:
+  - example_data/lh_GM.vtk
+  - example_data/rh_GM.vtk
+  input_WMs:
+  - example_data/lh_WM.vtk
+  - example_data/rh_WM.vtk
+  output_images:
+  output_GMs:
+  output_WMs:
+
+Labels:
+  atrophy_target_labels:
+  - 1030
+  - 2030
+  wm_labels:
+  - 2
+  - 41
+  lh_GM_template_labels: 3
+  lh_WM_template_labels: 2
+  rh_GM_template_labels: 42
+  rh_WM_template_labels: 41
+
+n_atrophy_iters: 1
+upsampling_factor: 1.0
+MSDD: true
+RAS: true
