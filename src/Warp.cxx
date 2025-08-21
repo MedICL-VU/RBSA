@@ -113,78 +113,7 @@ void Warper::ComputeTransform()
 }
 
 
-// ------------------ Other functions related to the warping ------------------
-
-
-std::array<VectorImageType::Pointer, 2> CombineWarps(std::vector<RBSAOutTuple> warpData)
-{
-  VectorImageType::PixelType zeroVec = itk::NumericTraits<VectorImageType::PixelType>::ZeroValue();
-  
-  // Initialize new vector image
-  VectorImageType::Pointer reference = std::get<1>(warpData.at(0));
-  VectorImageType::Pointer outWarp = DuplicateImage<VectorImageType>(reference);
-  outWarp->FillBuffer(zeroVec);
-  VectorImageType::Pointer outInverseWarp = DuplicateImage<VectorImageType>(outWarp);
-  
-  // Combine inputs
-  std::vector<VectorImageType::PixelType> disps, inverseDisps;
-  ImageRegionIteratorWithIndexType<VectorImageType> iterator
-    (outWarp, outWarp->GetLargestPossibleRegion());
-  iterator.GoToBegin();
-
-  while(!iterator.IsAtEnd()) {
-    const VectorImageType::IndexType& index = iterator.GetIndex();
-
-    // Get values from input warp if mask is nonzero
-    for(const auto& data : warpData) {
-      UCharImageType::Pointer mask = std::get<0>(data);
-      VectorImageType::Pointer warp = std::get<1>(data);
-      VectorImageType::Pointer inverseWarp = std::get<2>(data);
-      
-      if(mask->GetPixel(index) == 1) {
-	disps.emplace_back(warp->GetPixel(index));
-	inverseDisps.emplace_back(inverseWarp->GetPixel(index));
-      }
-    }
-
-    // Set combined warp value
-    if(!disps.empty()) {
-      VectorImageType::PixelType pixel;
-      pixel.Fill(0);
-
-      for(const auto& disp : disps) {
-        for(unsigned int d = 0; d < nDims; d++) {
-          pixel[d] += disp[d];
-        }
-      }
-      pixel /= static_cast<double>(disps.size());
-      outWarp->SetPixel(index, pixel);
-    }
-
-    // Set combined inverseWarp value
-    if(!inverseDisps.empty()) {
-      VectorImageType::PixelType pixel;
-      pixel.Fill(0);
-      
-      for(const auto& disp : inverseDisps) {
-	for(unsigned int d = 0; d < nDims; d++) {
-          pixel[d] += disp[d];
-        }
-      }
-      pixel /= static_cast<double>(inverseDisps.size());
-      outInverseWarp->SetPixel(index, pixel);
-    }
-    
-    // Reset
-    disps.clear();
-    inverseDisps.clear();
-    ++iterator;
-  }
-
-  // Output
-  return {outWarp, outInverseWarp};
-}
-
+// ------------------ Functions to apply the warps ------------------
 
 FloatImageType::Pointer WarpImage
 (FloatImageType::Pointer image, VectorImageType::Pointer warp)

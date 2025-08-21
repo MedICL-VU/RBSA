@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import glob
+import yaml
 
 
 description = """
@@ -40,102 +41,206 @@ The code has two input modes:
 #---------------------------------------------------------------------------------------------------
 
 def main():
-    def _check_args(args):
-        for arg in args:
-            if arg in sys.argv:
-                return True
-        return False
-
-    # Set up arg parser
-    parser = argparse.ArgumentParser(description=description)
-    parser = _define_args(parser)
-
+    # Parse commandline args
     if len(sys.argv) < 2:
         parser.print_help()
         sys.exit(1)
-        
-    pargs = parser.parse_args()
-    mode = 'normal' if pargs.sd is None and pargs.s is None else 'FS'
 
-    # Sanity checks
+    if '--config' not in sys.argv:
+        _error('Please input a .yaml config file (--config <CONFIG>)')
+    
+    parser = argparse.ArgumentParser(description=description)
+    parser = _define_args(parser)
+    pargs = parser.parse_args()
+
+    config_path = pargs.config
+    no_MSDD = pargs.no_MSDD
+    no_output = pargs.no_output
+
+    # Read config file
+    if not os.path.isfile(config_path):
+        _error(f'config file {config_path} does not exist :(')
+    elif config_path.split('.')[-1] != 'yaml':
+        _error(f'config file must have .yaml extension (user provided {config_path})')
+
+    config = yaml.safe_load(open(config_path))
+    mode, FS_config = (
+        ('FS', config.get('FS_mode')) if config.get('FS_mode') is not None
+        else ('normal', None)
+    )
+    fnames_config = config.get('Filenames') if config.get('Filenames') is not None else _error(
+        '.yaml config should have a top-level item containing all input paths'
+    )
+    labels_config = config.get('Labels') if config.get('Labels') is not None else _error(
+        '.yaml config should have a top-level item containing all input paths'
+    )
+    
+    FS_defaults = yaml.safe_load(open('configs/FS_mode_defaults.yaml')) if mode == 'FS' else None
+    
+    # Arg checking (mode specific)
     if mode == 'FS':
         if not os.environ.get('FREESURFER_HOME'):
             _error('FREESURFER_HOME is not set. Please source FreeSurfer.')
 
-        if pargs.input_images is not None and pargs.output_images is not None:
-            print('Warning: --output_images arg is ignored w/ FS mode... outputs will be written '
-                  'to <output_dir>/<basename(input)>.RBSA.nii.gz for each input image')
-            
-        if pargs.input_GMs is not None and pargs.output_GMs is not None:
-            print('Warning: --output_GMs arg is ignored w/ FS mode... outputs will be written '
-                  'to <output_dir>/<basename(input)>.RBSA.vtp for each input GM surface)')
+        FS_subjects_dir = (
+            FS_config.get('subjects_dir') if FS_config.get('subjects_dir') is not None
+            else os.environ.get('SUBJECTS_DIR')
+        )
+        if FS_subjects_dir is None:
+            _error('must specify subjects_dir in either the .yaml config or the os environment.')
 
-        if pargs.input_WMs is not None and pargs.output_WMs is not None:
-            print('Warning: --output_WMs arg is ignored w/ FS mode... outputs will be written '
-                  'to <output_dir>/<basename(input)>.RBSA.vtp for each input WM surface)')
+        FS_subject_ids = FS_config.get('subject_ids')
 
+        if fnames_config.get('parcellation') is None:
+            fnames_config['parcellation'] = FS_defaults.get('parcellation')
+            print(f'no path to cortical parcellation specified in .yaml config... using default '
+                  '{FS_defaults.get("parcellation")]}.')
+
+        if fnames_config.get('skullstrip') is None:
+            fnames_config['skullstrip'] = FS_defaults.get('skullstrip')
+            print(f'no path to skullstrip image specified in .yaml config... using default '
+                  '{FS_defaults.get("skullstrip")}.')
+
+        if fnames_config.get('hemis_template') is None and not no_MSDD:
+            fnames_config['hemis_template'] = FS_defaults.get('hemis_template')
+            print(f'no path to template image (hemis_template) used to create surfaces '
+                  'for measuring ground truth change (e.g., MSDD)... using default '
+                  'FS_defaults.get("hemis_template")]}.')
+
+        if not no_MSDD and fnames_config['hemis_template'] != 'ribbon.mgz' and (
+                labels_config.get('lh_GM_template_labels') is None
+                or labels_config.get('lh_WM_template_labels') is None
+                or labels_config.get('rh_GM_template_labels') is None
+                or labels_config.get('rh_WM_template_labels') is None
+        ):
+            _error('must provide label values for left GM, left WM, right GM, and right WM if not '
+                   'using the default ribbon.mgz FreeSurfer recon-all output for the '
+                   'hemis_template variable')
+        else:
+            labels_config['lh_GM_template_labels'] = 3
+            labels_config['lh_WM_template_labels'] = 2
+            labels_config['rh_WM_template_labels'] = 42
+            labels_config['rh_WM_template_labels'] = 41
+
+    elif mode == 'normal':
+        FS_subjects_dir = None
+        FS_subject_ids = None
+        
+        if fnames_config.get('parcellation') is None:
+            _error('must specify path to cortical parcellation (parcellation) when running in '
+                   'normal mode.')
+        
+        if fnames_config.get('skullstrip') is None:
+            _error('must specify path to skullstrip image (skullstrip) when running in normal '
+                   'mode.')
+
+        if fnames_config.get('output_dir') is None and not no_output:
+            _error('must specify path to output directory (output_dir) when running in normal mode '
+                   'unless --no_output is specified.')
+
+        if not no_MSDD:
+            if fnames_config.get('hemis_template') is None:
+                _error('must specify path to template image (hemis_template) used to create '
+                       'surfaces for measuring ground truth change (e.g., MSDD) unless --no_MSDD '
+                       'is specified.')
+
+            if (labels_config.get('lh_GM_template_labels') is None
+                or labels_config.get('lh_WM_template_labels') is None
+                or labels_config.get('rh_GM_template_labels') is None
+                or labels_config.get('rh_WM_template_labels') is None
+            ):
+                _error('must provide label values for left GM, left WM, right GM, and right WM '
+                       ' within the hemis_template image.')
+
+        if labels_config.get('wm_labels') is None:
+            _error('must provide values for the WM labels within the input cortical parcellation.')
+
+    # Checking target data paths
+    if fnames_config.get('input_images') is None and fnames_config.get('output_images') is not None:
+        _error('output_images is provided, but input_images is empty')
+
+    if fnames_config.get('input_GMs') is None and fnames_config.get('output_GMs') is not None:
+        _error('output_GMs is provided, but input_GMs is empty')
+
+    if fnames_config.get('input_WMs') is None and fnames_config.get('output_WMs') is not None:
+        _error('output_WMs is provided, but input_WMs is empty')
+
+    # Checking target label values
+    if labels_config.get('atrophy_target_labels') is None:
+        if labels_config.get('atrophy_target_file') is None:
+            _error('must provide within the .yaml config a list of target labels for synthetic '
+                   'atrophy induction either (1) directly, via the atrophy_target_labels item, or '
+                   '(2) inside of a separate text file, the path to which is specified via the '
+                   'atrophy_target_labels_file within the .yaml config.')
+        else:
+            if not os.path.isfile(labels_config.get('atrophy_target_file')):
+                _error(f'{labels_config.get("atrophy_target_file")} is not a valid file :(')
+            with open(labels_config.get('atrophy_target_file')) as f:
+                labels_config['atrophy_target_labels'] = f.read().splitlines()
     else:
-        if pargs.output_dir is None:
-            _error('output directory (--output_dir) is required')
+        if labels_config.get('atrophy_target_labels_file') is not None:
+            labels_config['atrophy_target_labels_file'] = None
+            print('Warning: both "atrophy_target_labels_file" and "atrophy_target_labels" provided '
+                  'in .yaml config... taking target labels from "atrophy_target_labels" and '
+                  'ignoring "atrophy_target_labels_file"')
 
-        if pargs.input_images is None and pargs.output_images is not None:
-            _error('--output_images is provided, but --input_images is empty')
-
-        if pargs.input_GMs is None and pargs.output_GMs is not None:
-            _error('--output_GMs is provided, but --input_GMs is empty')
-
-        if pargs.input_WMs is None and pargs.output_WMs is not None:
-            _error('--output_WMs is provided, but --input_WMs is empty')
+    for labels in [
+            'atrophy_target_labels', 'wm_labels', 'lh_GM_template_labels', 'lh_WM_template_labels',
+            'rh_GM_template_labels', 'rh_WM_template_labels'
+    ]:
+        if not isinstance(labels_config[f'{labels}'], list):
+            labels_config[f'{labels}'] = [labels_config[f'{labels}']]
             
-    RAS = True if mode == 'FS' else pargs.RAS
+    # Checking parameter values
+    n_atrophy_iters = config.get('n_atrophy_iters')
+    upsampling_factor = config.get('upsampling_factor')
+        
+    if n_atrophy_iters is None and upsampling_factor is None:
+        n_atrophy_iters = 4
+        upsampling_factor = 4.0
+        print('using default values n_atrophy_iters=4 and upsampling_factor=4.0')
+    
+    elif config.get('n_atrophy_iters') is None:
+        n_atrophy_iters = 1 if upsampling_factor < 1 else int(upsampling_factor)
+        print(f'n_atrophy_iters not specified... calculating from int(upsampling_factor)')
 
-    MSDD = True if _check_args(['--hemis_template']) else pargs.MSDD
-    lh_GM_template_labels = (
-        pargs.lh_GM_template_labels if isinstance(pargs.lh_GM_template_labels, list)
-        else [pargs.lh_GM_template_labels]
-    )
-    lh_WM_template_labels = (
-        pargs.lh_WM_template_labels if isinstance(pargs.lh_WM_template_labels, list)
-        else [pargs.lh_WM_template_labels]
-    )
-    rh_GM_template_labels = (
-        pargs.rh_GM_template_labels if isinstance(pargs.rh_GM_template_labels, list)
-        else [pargs.rh_GM_template_labels]
-    )
-    rh_WM_template_labels = (
-        pargs.rh_WM_template_labels if isinstance(pargs.rh_WM_template_labels, list)
-        else [pargs.rh_WM_template_labels]
-    )
+    elif config.get('upsampling_factor') is None:
+        upsampling_factor = float(n_atrophy_iters)
+        print('upsampling_factor not specified... setting equal to n_atrophy_iters to induce '
+              'equivalent of 1 voxel worth of atrophy')
+        
+    if not isinstance(config.get('n_atrophy_iters'), int):
+        n_atrophy_iters = int(n_atrophy_iters)
+        print(f'n_atrophy_iters must be an integer... converting input value from '
+              '{config.get("n_atrophy_iters")} to {n_atrophy_iters}')
+        
+    RAS = True if mode == 'FS' else config.get('RAS') if config.get('RAS') is not None else False 
+    MSDD = True if config.get('hemis_template') is not None and not no_MSDD else False
 
     # Get filenames
     paths_dict = _get_filenames(
         mode=mode,
-        FS_subject_ids=pargs.s,
-        FS_subjects_dir=pargs.sd,
-        parcellation=pargs.parcellation,
-        skullstrip=pargs.skullstrip_mask,
-        output_dir=pargs.output_dir,
-        input_images=pargs.input_images,
-        output_images=pargs.output_images,
-        input_GMs=pargs.input_GMs,
-        output_GMs=pargs.output_GMs,
-        input_WMs=pargs.input_WMs,
-        output_WMs=pargs.output_WMs,
-        hemis_template=pargs.hemis_template if MSDD else None,
+        FS_subject_ids=FS_subject_ids,
+        FS_subjects_dir=FS_subjects_dir,
+        **fnames_config
     )
 
     for _dict in paths_dict:
         # Convert files to compatible types w/ ITK/VTK (e.g., .mgz-->nii.gz, .gii-->.vtp)
-        if mode == 'FS' and _dict['output_dir'] != pargs.sd or mode == 'normal':
+        if mode == 'FS' and _dict['output_dir'] != FS_subjects_dir or mode == 'normal':
             input_dir = os.path.join(_dict['output_dir'], 'inputs')
             target_dir = os.path.join(_dict['output_dir'], 'targets')
             os.makedirs(input_dir, exist_ok=True)
             os.makedirs(target_dir, exist_ok=True)
-            os.makedirs(os.path.join(_dict['output_dir'], 'MSDD'))
 
-        for varname in ['parcellation', 'skullstrip', 'hemis_template']:
-            _dict[varname] = _ensure_filetype_compatability(
-                _symlink(_dict[varname], input_dir, varname), 'image'
+            for key in ['output_images', 'output_GMs', 'output_WMs']:
+                _dict[key] = [
+                    os.path.join(target_dir, os.path.basename(fname)) for fname in _dict[key]
+                ] if _dict[key] is not None else None
+
+        for key in ['parcellation', 'skullstrip', 'hemis_template']:
+            _dict[key] = _ensure_filetype_compatability(
+                _symlink(_dict[key], input_dir, key), 'image'
             )
 
         for key in ['input_images', 'output_images']:
@@ -151,36 +256,41 @@ def main():
                     _symlink(fname, target_dir) if os.path.isfile(fname) else fname, 'surface', RAS
                 ) for fname in _dict[key]
             ] if _dict[key] is not None else None
-    
+
         # Run RBSA
         cmd = './RBSA'
         cmd += f' --parcellation {_dict["parcellation"]}'
-        cmd += f' --skullstrip_mask {_dict["skullstrip"]}'
+        cmd += f' --skullstrip {_dict["skullstrip"]}'
         cmd += f' --output_dir {_dict["output_dir"]}'
-
+        
         cmd += ' --target_labels'
-        for label in pargs.target_labels:
+        for label in labels_config.get('atrophy_target_labels'):
             cmd += f' {label}'
         cmd += ' --wm_labels'
-        for label in pargs.wm_labels:
+        for label in labels_config.get('wm_labels'):
             cmd += f' {label}'
         
-        cmd += f' --n_atrophy_iters {pargs.n_atrophy_iters}'
-        cmd += f' --upsampling_factor {pargs.upsampling_factor}'
+        cmd += f' --n_atrophy_iters {n_atrophy_iters}'
+        cmd += f' --upsampling_factor {upsampling_factor}'
 
-        cmd += f' --hemis_template {_dict["hemis_template"]}'
-        cmd += ' --lh_GM_template_labels'
-        for label in lh_GM_template_labels:
-            cmd += f' {label}'
-        cmd += ' --lh_WM_template_labels'
-        for label in lh_WM_template_labels:
-            cmd += f' {label}'
-        cmd += ' --rh_GM_template_labels'
-        for label in rh_GM_template_labels:
-            cmd += f' {label}'
-        cmd += ' --rh_WM_template_labels'
-        for label in rh_WM_template_labels:
-            cmd += f' {label}'
+        if MSDD:
+            MSDD_dir = os.path.join(_dict['output_dir'], 'MSDD')
+            os.makedirs(MSDD_dir, exist_ok=True)
+            cmd += f' --MSDD_dir {MSDD_dir}'
+
+            cmd += f' --hemis_template {_dict["hemis_template"]}'
+            cmd += ' --lh_GM_template_labels'
+            for label in labels_config.get('lh_GM_template_labels'):
+                cmd += f' {label}'
+                cmd += ' --lh_WM_template_labels'
+            for label in labels_config.get('lh_WM_template_labels'):
+                cmd += f' {label}'
+                cmd += ' --rh_GM_template_labels'
+            for label in labels_config.get('rh_GM_template_labels'):
+                cmd += f' {label}'
+                cmd += ' --rh_WM_template_labels'
+            for label in labels_config.get('rh_WM_template_labels'):
+                cmd += f' {label}'
         
         if _dict['input_images'] is not None:
             cmd += ' --input_images'
@@ -209,92 +319,22 @@ def main():
         cmd += ' --RAS' if RAS else ''
         
         print(cmd)
+        exit()
         if os.system(cmd) > 0:
             _error(f"[run_RBSA.py] RBSA :(")
 
 
 
 def _define_args(parser):
-    # Required args
-    parser.add_argument('-l', '--target_labels', type=int, nargs='+',
-                        help='Value of target labels for atrophy induction (always required)')
-
-    # Required (normal mode)
-    parser.add_argument('-p', '--parcellation', type=str, default='aparc+aseg.mgz',
-                        help='Path to input cortical parcellation image')
-    parser.add_argument('-m', '--skullstrip_mask', type=str, default='brainmask.mgz',
-                        help='Path to input skull stripped image to create mask')
-    parser.add_argument('-o', '--output_dir', type=str,
-                        help='Path to output directory (required w/ normal mode)')
-
-    # Required (FS mode)
-    parser.add_argument('-s', '--s', nargs='*',
-                        help='Process a series of FS recon-all subjects (enables FS mode)')
-    parser.add_argument('--sd',
-                        help='Set the subjects directory (overrides the SUBJECTS_DIR env variable '
-                        'and also enables FS mode)')
-
-    # Erosion morphology parameters
-    parser.add_argument('-n', '--n_atrophy_iters', type=int, default=4,
-                        help='Number of binary morphology iterations to induce synthetic atrophy')
-    parser.add_argument('-f', '--upsampling_factor', type=float, default=4.,
-                        help='Factor by which to upsample image resolution for atrophy induction')
-    parser.add_argument('-w', '--wm_labels', nargs='*', type=int, default=[2, 41],
-                        help='Value(s) of wm label ipsilateral to target label(s)')
-
-    # Target image/surface data
-    parser.add_argument('-i', '--input_images', nargs='*', type=str,
-                        help='Path(s) to image(s) in which to induce synthetic atrophy')
-    parser.add_argument('--input_GMs', nargs='*', type=str,
-                        help='Path(s) to gray matter (GM/pial) surface(s) in which to induce '
-                        'synthetic atrophy')
-    parser.add_argument('--input_WMs', nargs='*', type=str,
-                        help='Path(s) to white matter (WM) surface(s) in which to induce synthetic '
-                        'atrophy')
-    parser.add_argument('--RAS', action='store_true',
-                        help='Convert input target surface vertices from RAS to LPS coordinates '
-                        '(default = on in FS mode)')
-
-    parser.add_argument('--output_images', nargs='*', type=str,
-                        help='Paths to output images with induced synthetic atrophy (overrides '
-                        'output_dir, should match number of input images if provided). If none '
-                        'provided, or if running in FS mode, outputs will be written to '
-                        '<output_dir>/<basename(input)>.RBSA.mgz for each input in input_images.')
-    parser.add_argument('--output_GMs', nargs='*', type=str,
-                        help='Paths to output gray matter (GM/pial) surfaces with induced '
-                        'synthetic atrophy (overrides output_dir, should match number of input GM '
-                        'surfaces, if provided). If no paths provided, or if running in FS mode, '
-                        'outputs will be written to <output_dir>/<basename(input)>.RBSA.vtp for '
-                        'each input in input_GMs')
-    parser.add_argument('--output_WMs', nargs='*', type=str,
-                        help='Paths to output white matter (WM) surfaces with induced synthetic '
-                        'atrophy (overrides output_dir, should match number of input WM surfaces, '
-                        'if provided). If no paths provided, or if running in FS mode, outputs '
-                        'will be written to <output_dir>/<basename(input)>.RBSA.vtp for each input '
-                        'in input_WMs')
-
-    # MSDD inputs
-    parser.add_argument('--MSDD', action='store_true',
-                        help='Flag to calculate mean surface displacement different (MSDD) in'
-                        ' target atrophy labels. Providing an input for --hemi_template will set '
-                        'this flag to true as well.')
-    parser.add_argument('-t', '--hemis_template', type=str, default='ribbon.mgz',
-                        help='Path to input image used to generate GM/WM templates for both the '
-                        'left and right hemispheres (required for calculating MSDD, default in '
-                        'FreeSurfer mode is ribbon.mgz).')
-    parser.add_argument('--lh_GM_template_labels', nargs='+', type=int, default=2,
-                        help='Value of left GM label(s) in the input --hemis_template (default is '
-                        '2, as in ribbon.mgz)')
-    parser.add_argument('--lh_WM_template_labels', nargs='+', type=int, default=41,
-                        help='Value of left WM label(s) in the input --hemis_template (default is '
-                        '41, as in ribbon.mgz)')
-    parser.add_argument('--rh_GM_template_labels', nargs='+', type=int, default=3,
-                        help='Value of right GM label(s) in the input --hemis_template (default is '
-                        '3, as in ribbon.mgz)')
-    parser.add_argument('--rh_WM_template_labels', nargs='+', type=int, default=42,
-                        help='Value of right WM label(s) in the input --hemis_template (default is '
-                        '42, as in ribbon.mgz)')
-
+    parser.add_argument('-config', '--config', type=str,
+                        help='Path to .yaml file containing all input parameters/files.')
+    parser.add_argument('--no_MSDD', action='store_true',
+                        help='Flag to turn off calculation of  mean surface displacement '
+                        'difference (MSDD),')
+    parser.add_argument('--no_output', action='store_true',
+                        help='Flag to turn off writing warps and auxilary data (e.g., surfaces '
+                        'used to calculate MSDD) to file. Does not turn off writing target data '
+                        'with simulated atrophy.')
     return parser
 
 
@@ -373,7 +413,7 @@ def _get_filenames(mode='normal',
         in_image_paths = None if input_images is None else list(
             map(list, zip(*[_parse_filenames(sdir, subjects, 'mri', x) for x in input_images]))
         )
-        out_image_paths = [
+        out_image_paths = [ # TO-DO:  add the ability to provide output paths too
             [os.path.join(dirname, _add_tag(x, 'RBSA')) for x in input_images]
             for dirname in output_dir
         ] if input_images is not None else None
@@ -423,7 +463,7 @@ def _get_filenames(mode='normal',
             f'Input parcellation f{parcellation} does not exist'
         )
         out_dict['skullstrip'] = skullstrip if os.path.isfile(skullstrip) else _error(
-            f'Input skullstripped image f{skullstrip_mask} does not exist'
+            f'Input skullstripped image f{skullstrip} does not exist'
         )
         out_dict['hemis_template'] = (
             None if hemis_template is None

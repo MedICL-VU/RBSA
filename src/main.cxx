@@ -16,6 +16,8 @@ int main(int argc, char * argv[])
   std::string parcellationFileName;
   std::string skullStripMaskFileName;
   std::string outputDirName;
+  std::string targetDirName;
+  std::string msddDirName;
 
   std::vector<int> targetLabels;
   std::vector<int> wmLabels = {2, 41};
@@ -51,12 +53,16 @@ int main(int argc, char * argv[])
     ("-p,--parcellation", parcellationFileName, "Path to input cortical parcellation image")
     ->type_name("")->group("REQUIRED (normal mode)");
   app.add_option
-    ("-m,--skullstrip_mask", skullStripMaskFileName, "Path to input skull strip mask")
+    ("-m,--skullstrip", skullStripMaskFileName, "Path to input skull strip mask")
     ->type_name("")->group("REQUIRED (normal mode)");
-  app.add_option
-    ("-d,--output_dir", outputDirName, "Path to output directory")
-    ->type_name("")->group("REQUIRED");
 
+  // Output directories
+  app.add_option
+    ("-d,--output_dir", outputDirName, "Path to general directory")
+    ->type_name("")->group("REQUIRED");
+  app.add_option
+    ("--MSDD_dir", msddDirName, "Path to output directory for MSDD outputs");
+  
   // Erosion morphology parameters
   app.add_option
     ("-n,--n_atrophy_iters", nErosionIters,
@@ -258,10 +264,13 @@ int main(int argc, char * argv[])
   imageWarp = std::get<1>(compositeOutputs);
   surfaceWarp = std::get<2>(compositeOutputs);
 
-  WriteImage<VectorImageType>(imageWarp, outputDirName + "warp.nii.gz");
-  WriteImage<VectorImageType>(surfaceWarp, outputDirName + "warp_inverse.nii.gz");
+  WriteImage<VectorImageType>(imageWarp, outputDirName + "/warp.nii.gz");
+  std::cout << "Writing atrophy warp to " << outputDirName
+	    << "/warp.nii.gz" << std::endl;
+  WriteImage<VectorImageType>(surfaceWarp, outputDirName + "/warp_inverse.nii.gz");
+  std::cout << "Writing inverse atrophy warp to " << outputDirName
+            << "/warp_inverse.nii.gz" << std::endl;
   
-
   // Apply to target image data
   std::cout << "Applying to target image data.." << std::endl;
   
@@ -318,7 +327,9 @@ int main(int argc, char * argv[])
 			 rhGMTemplateLabels, rhWMTemplateLabels);
   msdd.Calculate();
 
-  std::string msddDirName = outputDirName + "/MSDD";
+  if(msddDirName.empty()) {
+    msddDirName = outputDirName + "/MSDD";
+  }
   msdd.Write(msddDirName);
 
   return 0;

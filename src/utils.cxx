@@ -27,6 +27,7 @@ template bool IsInside<FloatImageType>
 template bool IsInside<UCharImageType>
 (const UCharImageType::PixelType& label, const std::vector<UCharImageType::PixelType>& valid);
 
+
 /*
   ----------
   --- IO ---
@@ -70,6 +71,13 @@ std::string GetFileExtension(std::string filename) {
 }
 
 
+std::string GetBaseName(const std::string& filename) {
+  std::string basename = filename.substr(filename.find_last_of("/") + 1);
+  std::string::size_type const p(basename.find_last_of("."));
+  return basename.substr(0, p);
+}
+
+    
 bool CheckFileExtension(std::string filename, std::vector<std::string> exts)
 {
   std::string f_ext = GetFileExtension(filename);
@@ -102,7 +110,8 @@ template UCharImageType::Pointer ReadImage<UCharImageType>(const std::string&);
 
 // ITK writer
 template <typename TImage>
-void WriteImage(typename TImage::Pointer image, const std::string& filename)
+void WriteImage
+(typename TImage::Pointer image, const std::string& filename)
 {
   auto writer = ImageWriterType<TImage>::New();
   writer->SetInput(image);

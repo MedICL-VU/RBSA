@@ -99,6 +99,14 @@ bool IsInside
   
 
 // IO
+std::vector<std::string> SplitString(std::string str, const std::string& delimiter);
+
+std::string GetFileExtension(std::string filename);
+
+std::string GetBaseName(const std::string& filename);
+
+bool CheckFileExtension(std::string filename, std::vector<std::string> exts);
+
 template <typename TImage>
 using ImageReaderType = itk::ImageFileReader<TImage>;
 template <typename TImage>
