@@ -39,7 +39,7 @@ done
 
 # Build
 BUILD_DIR="build"
-mkdir -p "$BUILD_DIR"
+mkdir -p "${BUILD_DIR}/bin"
 
 echo "Configuring in $BUILD_DIR (type: $BUILD_TYPE)"
 cmake -S . -B "$BUILD_DIR" \
