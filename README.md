@@ -25,7 +25,7 @@ This repository contains a Registration-based tool for inducing ground truth, sy
 - VTK: https://vtk.org/download/
   - version 9.3.0 or later
 - FreeSurfer (optional): https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall
-  - Not required to run, but there is an option to run the pipeline in a way to easily interface with FreeSurfer's recon-all outputs instead of using user-provided paths for all inputs. I designed the tool using FS label maps; it should theoretically work with any compatible set of labels (as outlined in the paper), but I haven't actually tested it with anything else. If you do use something other than FS to generate these, feel free to let me know!
+  - Not required to run, but there is an option to run the pipeline in a way to easily interface with FreeSurfer's recon-all outputs instead of using user-provided paths for all inputs. I designed the tool using FS label maps; it should theoretically work with any compatible set of labels (as outlined in the paper), but I haven't actually tested it with anything else. If you do use something other than FS to generate these, feel free to let me know.
 
 ### Compilation
 
