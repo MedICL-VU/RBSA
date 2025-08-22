@@ -62,7 +62,7 @@ def main():
         _error(f'config file {config_path} does not exist :(')
     elif config_path.split('.')[-1] != 'yaml':
         _error(f'config file must have .yaml extension (user provided {config_path})')
-
+    
     config = yaml.safe_load(open(config_path))
     mode, FS_config = (
         ('FS', config.get('FS_mode')) if config.get('FS_mode') is not None
@@ -75,7 +75,7 @@ def main():
         '.yaml config should have a top-level item containing all input paths'
     )
     
-    FS_defaults = yaml.safe_load(open('configs/FS_mode_defaults.yaml')) if mode == 'FS' else None
+    FS_defaults = _get_FS_defaults() if mode == 'FS' else None
     
     # Arg checking (mode specific)
     if mode == 'FS':
@@ -88,9 +88,10 @@ def main():
         )
         if FS_subjects_dir is None:
             _error('must specify subjects_dir in either the .yaml config or the os environment.')
-
-        FS_subject_ids = FS_config.get('subject_ids')
-
+        
+        FS_subject_ids = (
+            pargs.subject_id if pargs.subject_id is not None else FS_config.get('subject_ids')
+        )
         if fnames_config.get('parcellation') is None:
             fnames_config['parcellation'] = FS_defaults.get('parcellation')
             print(f'no path to cortical parcellation specified in .yaml config... using default '
@@ -227,7 +228,7 @@ def main():
 
     for _dict in paths_dict:
         # Convert files to compatible types w/ ITK/VTK (e.g., .mgz-->nii.gz, .gii-->.vtp)
-        if mode == 'FS' and _dict['output_dir'] != FS_subjects_dir or mode == 'normal':
+        if mode == 'FS':
             input_dir = os.path.join(_dict['output_dir'], 'inputs')
             target_dir = os.path.join(_dict['output_dir'], 'targets')
             os.makedirs(input_dir, exist_ok=True)
@@ -238,27 +239,28 @@ def main():
                     os.path.join(target_dir, os.path.basename(fname)) for fname in _dict[key]
                 ] if _dict[key] is not None else None
 
-        for key in ['parcellation', 'skullstrip', 'hemis_template']:
-            _dict[key] = _ensure_filetype_compatability(
-                _symlink(_dict[key], input_dir, key), 'image'
-            )
+            for key in ['parcellation', 'skullstrip', 'hemis_template']:
+                _dict[key] = _ensure_filetype_compatability(
+                    _symlink(_dict[key], input_dir, key), 'image'
+                )
 
-        for key in ['input_images', 'output_images']:
-            _dict[key] = [
-                _ensure_filetype_compatability(
-                    _symlink(fname, target_dir) if os.path.isfile(fname) else fname, 'image'
-                ) for fname in _dict[key]
-            ] if _dict[key] is not None else None
+            for key in ['input_images', 'output_images']:
+                _dict[key] = [
+                    _ensure_filetype_compatability(
+                        _symlink(fname, target_dir) if os.path.isfile(fname) else fname, 'image'
+                    ) for fname in _dict[key]
+                ] if _dict[key] is not None else None
 
-        for key in ['input_GMs', 'input_WMs', 'output_GMs', 'output_WMs']:
-            _dict[key] = [
-                _ensure_filetype_compatability(
-                    _symlink(fname, target_dir) if os.path.isfile(fname) else fname, 'surface', RAS
-                ) for fname in _dict[key]
-            ] if _dict[key] is not None else None
+            for key in ['input_GMs', 'input_WMs', 'output_GMs', 'output_WMs']:
+                _dict[key] = [
+                    _ensure_filetype_compatability(
+                        _symlink(fname, target_dir) if os.path.isfile(fname)
+                        else fname, 'surface', RAS
+                    ) for fname in _dict[key]
+                ] if _dict[key] is not None else None
 
         # Run RBSA
-        cmd = './RBSA'
+        cmd = './build/bin/RBSA'
         cmd += f' --parcellation {_dict["parcellation"]}'
         cmd += f' --skullstrip {_dict["skullstrip"]}'
         cmd += f' --output_dir {_dict["output_dir"]}'
@@ -319,7 +321,6 @@ def main():
         cmd += ' --RAS' if RAS else ''
         
         print(cmd)
-        exit()
         if os.system(cmd) > 0:
             _error(f"[run_RBSA.py] RBSA :(")
 
@@ -335,6 +336,11 @@ def _define_args(parser):
                         help='Flag to turn off writing warps and auxilary data (e.g., surfaces '
                         'used to calculate MSDD) to file. Does not turn off writing target data '
                         'with simulated atrophy.')
+    parser.add_argument('-s', '--subject_id', nargs='+', type=str,
+                        help='Subject id to process (within FS mode, should be a subdir of the '
+                        'SUBJECTS_DIR environment variable or the FS_subjects_dir item within the '
+                        'input .yaml config. Providing this as a commandline argument overrides '
+                        'the "FS_subject_ids" item in the input config.')
     return parser
 
 
@@ -482,7 +488,7 @@ def _get_filenames(mode='normal',
         out_dict['output_images'] = (
             None if input_images is None
             else output_images if output_images is not None
-            else [os.path.join(output_dir, f'{_remove_ext(os.path.basename(x))[0]}.RBSA.nii.gz')
+            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.nii.gz')
                   for x in input_images]
         )
 
@@ -493,7 +499,7 @@ def _get_filenames(mode='normal',
         out_dict['output_GMs'] = (
             None if input_GMs is None
             else output_GMs if output_GMs is not None
-            else [os.path.join(output_dir, f'{_remove_ext(os.path.basename(x))[0]}.RBSA.vtp')
+            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.vtp')
                   for x in input_GMs
             ]
         )
@@ -525,6 +531,18 @@ def _error(message):
     sys.exit(1)
     return
 
+
+def _get_FS_defaults():
+    _dict = {}
+    _dict['parcellation'] = 'aparc+aseg.mgz'
+    _dict['skullstrip'] = 'brainmask.mgz'
+    _dict['hemis_template'] = 'ribbon.mgz'
+    _dict['wm_labels'] = [2, 41]
+    _dict['lh_GM_template_labels'] = 3
+    _dict['lh_WM_template_labels'] = 2
+    _dict['rh_GM_template_labels'] = 42
+    _dict['rh_WM_template_labels'] = 41
+    return _dict
 
 def _is_basename(inpath):
     return (inpath == os.path.basename(inpath))
