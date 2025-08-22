@@ -45,9 +45,9 @@ You can run the RBSA software with its required arguments as follows:
 ```
 - -p: the input cortical parcellation
 - -s: a skullstripped image or mask
-- o: the directory to which the output warps (e.g., the atrophy inducing transform and inverse) will be written
-- t: a list of target GM labels for atrophy induction that exist within the input parcellation
-- w: a list of WM labels ipsilateral to the target labels, also within the input parcellation
+- -o: the directory to which the output warps (e.g., the atrophy inducing transform and inverse) will be written
+- -t: a list of target GM labels for atrophy induction that exist within the input parcellation
+- -w: a list of WM labels ipsilateral to the target labels, also within the input parcellation
 
 To see all possible input args, you can print out the help message by running `./RBSA -h`.
 
