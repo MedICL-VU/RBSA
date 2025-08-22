@@ -31,7 +31,9 @@ This repository contains a Registration-based tool for inducing ground truth, sy
 
 Once you've installed ITK and VTK (and optionally FS), you can run the ./setup.sh script to compile the reposity:
 
+```
 ./setup.sh --itk <ITK_install_path>/lib/cmake/ITK-<version> --vtk <VTK_install_path>/lib64/cmake/VTK-<version>
+```
 
 This will point the compiler to the directories containing the ITKConfig.cmake and VTKConfig.cmake files, respectively. Running this script will automatically build and make the RBSA executable.
 
