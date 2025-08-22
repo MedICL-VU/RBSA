@@ -3,8 +3,8 @@
 # Usage:
 # ./setup.sh \
 #    [--build-type Release|Debug] \
-#    [--itk <ITK_install_path>/lib/cmake/ITK-<version>] \
-#    [--vtk /path/to/vtk-<ver>]
+#    [--itk <ITK_install_path>/lib/cmake] \
+#    [--vtk <VTK_install_path>/lib64/cmake]
 #
 # Notes:
 # - If you already set CMAKE_PREFIX_PATH to include ITK/VTK, you can omit --itk/--vtk.
