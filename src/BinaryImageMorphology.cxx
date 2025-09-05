@@ -1,9 +1,11 @@
 #include "BinaryImageMorphology.h"
 
 
-UCharImageType::Pointer DilateImage
-(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
- UCharImageType::PixelType value)
+//----------------------------------------------------------------------------------------------------
+
+TPointer<UCharImageType> DilateImage(TPointer<UCharImageType> image,
+				     BinaryBallStructuringElementType kernel,
+				     TPixel<UCharImageType> value)
 {
   auto filter = BinaryDilateImageFilterType::New();
   filter->SetInput(image);
@@ -11,13 +13,15 @@ UCharImageType::Pointer DilateImage
   filter->SetDilateValue(value);
   filter->Update();
 
-  return filter->GetOutput();
+  TPointer<UCharImageType> output = filter->GetOutput();
+  //output->DisconnectPipeline();
+  return output;
 }
 
 
-UCharImageType::Pointer ErodeImage
-(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
- UCharImageType::PixelType value)
+TPointer<UCharImageType> ErodeImage(TPointer<UCharImageType> image,
+				    BinaryBallStructuringElementType kernel,
+				    TPixel<UCharImageType> value)
 {
   auto filter = BinaryErodeImageFilterType::New();
   filter->SetInput(image);
@@ -25,11 +29,13 @@ UCharImageType::Pointer ErodeImage
   filter->SetErodeValue(value);
   filter->Update();
 
-  return filter->GetOutput();
+  TPointer<UCharImageType> output = filter->GetOutput();
+  //output->DisconnectPipeline();
+  return output;
 }
 
 
-UCharImageType::Pointer DilateErodeCorrection(UCharImageType::Pointer image)
+TPointer<UCharImageType> DilateErodeCorrection(TPointer<UCharImageType> image)
 {
   // Set up kernel
   BinaryBallStructuringElementType kernel;
@@ -39,52 +45,47 @@ UCharImageType::Pointer DilateErodeCorrection(UCharImageType::Pointer image)
   // Dilate and erode
   image = DilateImage(image, kernel);
   image = ErodeImage(image, kernel);
-
+  
   return image;
 }
 
   
 
-UCharImageType::Pointer LocalizedAtrophy
-(UCharImageType::Pointer targetLabelImage, UCharImageType::Pointer referenceAdjacentLabelImage,
- unsigned int nIters)
+TPointer<UCharImageType> LocalizedAtrophy(TPointer<UCharImageType> targetLabelImage,
+					  TPointer<UCharImageType> referenceAdjacentLabelImage,
+					  unsigned int nIters)
 {
   // Set up kernel
   BinaryBallStructuringElementType kernel;
   kernel.SetRadius(kernelRadius);
   kernel.CreateStructuringElement();
 
+  // Initialize masks
+  TPointer<UCharImageType> dilateMask = DilateImage(referenceAdjacentLabelImage, kernel);
+  TPointer<UCharImageType> output = DuplicateImage<UCharImageType>(targetLabelImage);
+  
   // Do 1 voxel erosions for each iteration
   unsigned int iter = 0;
-  UCharImageType::Pointer dilateMask = DilateImage(referenceAdjacentLabelImage, kernel);
   
-  while(iter < nIters) {
-    UCharImageType::Pointer erodeMask = ErodeImage(targetLabelImage, kernel);
-    
-    targetLabelImage = SubtractImages<UCharImageType>(targetLabelImage, erodeMask);
-    targetLabelImage = MultiplyImages<UCharImageType>(targetLabelImage, dilateMask);
-    targetLabelImage = AddImages<UCharImageType>(targetLabelImage, erodeMask);
-    targetLabelImage = BinaryThresholdImage<UCharImageType>(targetLabelImage, 1, 1, 0, 1);
-
-    iter++;
+  for(unsigned int iter = 0; iter < nIters; iter++) {
+    TPointer<UCharImageType> erodeMask = ErodeImage(output, kernel);
+    SubtractImagesInPlace<UCharImageType>(output, erodeMask);
+    MultiplyImagesInPlace<UCharImageType>(output, dilateMask);
+    AddImagesInPlace<UCharImageType>(output, erodeMask);
+    BinaryThresholdImageInPlace(output, 1, 1);
   }
 
-  return targetLabelImage;
+  return output;
 }
 
 
-UCharImageType::Pointer ReplaceLabelInImage
-(UCharImageType::Pointer inputImage, UCharImageType::Pointer origLabelMask,
- UCharImageType::Pointer atrophyLabelMask)
+TPointer<UCharImageType> ReplaceLabelInImage(TPointer<UCharImageType> image,
+					     TPointer<UCharImageType> oldLabel,
+					     TPointer<UCharImageType> newLabel)
 {
-  /* 1. Get reverse label mask
-     2. Multiply mask w/ input to remove origLabelMask from inputImage
-     3. Add atrophyLabelMask to product  */
-  
-  UCharImageType::Pointer outputImage =
-    BinaryThresholdImage<UCharImageType>(origLabelMask, 1, 1, 1, 0);
-  outputImage = MultiplyImages<UCharImageType>(outputImage, inputImage);
-  outputImage = AddImages<UCharImageType>(outputImage, atrophyLabelMask);
+  TPointer<UCharImageType> output = BinaryThresholdImage<UCharImageType>(oldLabel, 1, 1, 1, 0);
+  MultiplyImagesInPlace<UCharImageType>(output, image);
+  AddImagesInPlace<UCharImageType>(output, newLabel);
 
-  return outputImage;
+  return output;
 }

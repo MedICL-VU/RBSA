@@ -29,7 +29,7 @@ The code has two input modes:
    - Limited to processing 1 subject (e.g., using labels from a single input cortical parcellation)
      at a time
 2. FreeSurfer (FS) mode
-   - Requires either a list of subjects (--s) and/or the environment variable SUBJECTS_DIR (--sd). 
+   - Requires either a list of subjects (--s) and/or the environment variable SUBJECTS_DIR (--sd).
    - Output paths will be set automatically in the FS filename convention, but the user can override
      this by specifying an output directory (--output_dir) if desired.
    - Inputs should be provided as basenames of recon-all output files within the respective subject 
@@ -64,10 +64,8 @@ def main():
         _error(f'config file must have .yaml extension (user provided {config_path})')
     
     config = yaml.safe_load(open(config_path))
-    mode, FS_config = (
-        ('FS', config.get('FS_mode')) if config.get('FS_mode') is not None
-        else ('normal', None)
-    )
+    mode = 'FS' if pargs.sd is not None or pargs.src_subject is not None else 'normal'
+    
     fnames_config = config.get('Filenames') if config.get('Filenames') is not None else _error(
         '.yaml config should have a top-level item containing all input paths'
     )
@@ -76,22 +74,26 @@ def main():
     )
     
     FS_defaults = _get_FS_defaults() if mode == 'FS' else None
+    FS_src_ids = pargs.src_subject if pargs.src_subject is not None else None
+    FS_trg_ids = pargs.trg_subject if pargs.trg_subject is not None else None
     
     # Arg checking (mode specific)
     if mode == 'FS':
         if not os.environ.get('FREESURFER_HOME'):
             _error('FREESURFER_HOME is not set. Please source FreeSurfer.')
-
-        FS_subjects_dir = (
-            FS_config.get('subjects_dir') if FS_config.get('subjects_dir') is not None
-            else os.environ.get('SUBJECTS_DIR')
-        )
+            
+        FS_subjects_dir = pargs.sd if pargs.sd is not None else os.environ.get('SUBJECTS_DIR')
         if FS_subjects_dir is None:
-            _error('must specify subjects_dir in either the .yaml config or the os environment.')
+            _error('must specify subjects_dir either as an input with the -sd/--sd flag or in the '
+                   'os environment.')
+
+        if FS_trg_ids is not None and FS_src_ids is None:
+            _error('cannot specify output subject id(s) (-t,--trg_subject) without also specifying '
+                   'the corresponding input subject id(s) (-s,--src_subject).')
+        if FS_trg_ids is not None and len(FS_src_ids) != len(FS_trg_ids):
+            _error('if providing a list of output subject ids, the number of output ids must be '
+                   'equal to the number of input ids.')
         
-        FS_subject_ids = (
-            pargs.subject_id if pargs.subject_id is not None else FS_config.get('subject_ids')
-        )
         if fnames_config.get('parcellation') is None:
             fnames_config['parcellation'] = FS_defaults.get('parcellation')
             print(f'no path to cortical parcellation specified in .yaml config... using default '
@@ -109,14 +111,14 @@ def main():
                   'FS_defaults.get("hemis_template")]}.')
 
         if not no_MSDD and fnames_config['hemis_template'] != 'ribbon.mgz' and (
-                labels_config.get('lh_GM_template_labels') is None
-                or labels_config.get('lh_WM_template_labels') is None
-                or labels_config.get('rh_GM_template_labels') is None
-                or labels_config.get('rh_WM_template_labels') is None
+                (labels_config.get('lh_GM_template_labels') is None
+                 and labels_config.get('lh_WM_template_labels') is None) or
+                (labels_config.get('rh_GM_template_labels') is None
+                and labels_config.get('rh_WM_template_labels') is None)
         ):
-            _error('must provide label values for left GM, left WM, right GM, and right WM if not '
-                   'using the default ribbon.mgz FreeSurfer recon-all output for the '
-                   'hemis_template variable')
+            _error('must provide label values for either left GM and WM, right GM and WM, or all '
+                   'four classes if not using the default ribbon.mgz FreeSurfer recon-all output '
+                   'for the hemis_template variable')
         else:
             labels_config['lh_GM_template_labels'] = 3
             labels_config['lh_WM_template_labels'] = 2
@@ -145,13 +147,13 @@ def main():
                        'surfaces for measuring ground truth change (e.g., MSDD) unless --no_MSDD '
                        'is specified.')
 
-            if (labels_config.get('lh_GM_template_labels') is None
-                or labels_config.get('lh_WM_template_labels') is None
-                or labels_config.get('rh_GM_template_labels') is None
-                or labels_config.get('rh_WM_template_labels') is None
+            if ((labels_config.get('lh_GM_template_labels') is None
+                 or labels_config.get('lh_WM_template_labels') is None)
+                and (labels_config.get('rh_GM_template_labels') is None
+                     or labels_config.get('rh_WM_template_labels') is None)
             ):
-                _error('must provide label values for left GM, left WM, right GM, and right WM '
-                       ' within the hemis_template image.')
+                _error('must provide label values for either left GM and WM, right GM and WM, or '
+                       'all four classes within the hemis_template image.')
 
         if labels_config.get('wm_labels') is None:
             _error('must provide values for the WM labels within the input cortical parcellation.')
@@ -165,18 +167,18 @@ def main():
 
     if fnames_config.get('input_WMs') is None and fnames_config.get('output_WMs') is not None:
         _error('output_WMs is provided, but input_WMs is empty')
-
+    
     # Checking target label values
     if labels_config.get('atrophy_target_labels') is None:
-        if labels_config.get('atrophy_target_file') is None:
+        if labels_config.get('atrophy_target_labels_file') is None:
             _error('must provide within the .yaml config a list of target labels for synthetic '
                    'atrophy induction either (1) directly, via the atrophy_target_labels item, or '
                    '(2) inside of a separate text file, the path to which is specified via the '
                    'atrophy_target_labels_file within the .yaml config.')
         else:
-            if not os.path.isfile(labels_config.get('atrophy_target_file')):
-                _error(f'{labels_config.get("atrophy_target_file")} is not a valid file :(')
-            with open(labels_config.get('atrophy_target_file')) as f:
+            if not os.path.isfile(labels_config.get('atrophy_target_labels_file')):
+                _error(f'{labels_config.get("atrophy_target_labels_file")} is not a valid file :(')
+            with open(labels_config.get('atrophy_target_labels_file')) as f:
                 labels_config['atrophy_target_labels'] = f.read().splitlines()
     else:
         if labels_config.get('atrophy_target_labels_file') is not None:
@@ -189,7 +191,8 @@ def main():
             'atrophy_target_labels', 'wm_labels', 'lh_GM_template_labels', 'lh_WM_template_labels',
             'rh_GM_template_labels', 'rh_WM_template_labels'
     ]:
-        if not isinstance(labels_config[f'{labels}'], list):
+        if not (isinstance(labels_config.get(f'{labels}'), list)
+                or labels_config.get(f'{labels}') is None):
             labels_config[f'{labels}'] = [labels_config[f'{labels}']]
             
     # Checking parameter values
@@ -217,12 +220,13 @@ def main():
         
     RAS = True if mode == 'FS' else config.get('RAS') if config.get('RAS') is not None else False 
     MSDD = True if config.get('hemis_template') is not None and not no_MSDD else False
-
+    
     # Get filenames
     paths_dict = _get_filenames(
         mode=mode,
-        FS_subject_ids=FS_subject_ids,
-        FS_subjects_dir=FS_subjects_dir,
+        src_subjects=FS_src_ids,
+        trg_subjects=FS_trg_ids,
+        subjects_dir=FS_subjects_dir,
         **fnames_config
     )
 
@@ -264,12 +268,19 @@ def main():
         cmd += f' --parcellation {_dict["parcellation"]}'
         cmd += f' --skullstrip {_dict["skullstrip"]}'
         cmd += f' --output_dir {_dict["output_dir"]}'
+
+        if _dict['warp'] is not None:
+            cmd += f' --warp {_dict["warp"]}'
+        
+        if _dict['output_basename'] is not None:
+            cmd += f' --output_basename {_dict["output_basename"]}'
         
         cmd += ' --target_labels'
-        for label in labels_config.get('atrophy_target_labels'):
+        for label in labels_config['atrophy_target_labels']:
             cmd += f' {label}'
+
         cmd += ' --wm_labels'
-        for label in labels_config.get('wm_labels'):
+        for label in labels_config['wm_labels']:
             cmd += f' {label}'
         
         cmd += f' --n_atrophy_iters {n_atrophy_iters}'
@@ -282,16 +293,16 @@ def main():
 
             cmd += f' --hemis_template {_dict["hemis_template"]}'
             cmd += ' --lh_GM_template_labels'
-            for label in labels_config.get('lh_GM_template_labels'):
+            for label in labels_config['lh_GM_template_labels']:
                 cmd += f' {label}'
                 cmd += ' --lh_WM_template_labels'
-            for label in labels_config.get('lh_WM_template_labels'):
+            for label in labels_config['lh_WM_template_labels']:
                 cmd += f' {label}'
                 cmd += ' --rh_GM_template_labels'
-            for label in labels_config.get('rh_GM_template_labels'):
+            for label in labels_config['rh_GM_template_labels']:
                 cmd += f' {label}'
                 cmd += ' --rh_WM_template_labels'
-            for label in labels_config.get('rh_WM_template_labels'):
+            for label in labels_config['rh_WM_template_labels']:
                 cmd += f' {label}'
         
         if _dict['input_images'] is not None:
@@ -336,11 +347,24 @@ def _define_args(parser):
                         help='Flag to turn off writing warps and auxilary data (e.g., surfaces '
                         'used to calculate MSDD) to file. Does not turn off writing target data '
                         'with simulated atrophy.')
-    parser.add_argument('-s', '--subject_id', nargs='+', type=str,
-                        help='Subject id to process (within FS mode, should be a subdir of the '
+    parser.add_argument('-sd', '--sd', type=str,
+                        help='Directory containing any input subjects (overrides the SUBJECTS_DIR '
+                        'environment variable)')
+    parser.add_argument('-s', '--src_subject', nargs='+', type=str,
+                        help='Subject id(s) process (within FS mode, should be a subdir of the '
                         'SUBJECTS_DIR environment variable or the FS_subjects_dir item within the '
                         'input .yaml config. Providing this as a commandline argument overrides '
                         'the "FS_subject_ids" item in the input config.')
+    parser.add_argument('-t', '--trg_subject', nargs='+', type=str,
+                        help='New subject id(s) for each input (source) subject. This arg is only '
+                        'available if the user specifies a custom output_dir that differs from the '
+                        'input subject directory (-sd) or the SUBJECTS_DIR environment variable. '
+                        'This is useful if the user is intending to create a synthetic atrophy '
+                        'dataset with different subject names than that of the original (source) '
+                        'dataset. Note that this definition of "target subject" differs from that '
+                        'commonly used in FS programs, where the "source" and "target" subjects '
+                        'refer to moving and fixed surfaces/images, respectively, for two existing '
+                        'subjects.')
     return parser
 
 
@@ -363,11 +387,14 @@ def _ensure_filetype_compatability(inpath, data_type=None, RAS=False):
 
 
 def _get_filenames(mode='normal',
-                   FS_subject_ids=None,
-                   FS_subjects_dir=None,
+                   src_subjects=None,
+                   trg_subjects=None,
+                   subjects_dir=None,
                    parcellation=None,
                    skullstrip=None,
                    output_dir=None,
+                   output_basename=None,
+                   warp=None,
                    input_images=None,
                    output_images=None,
                    input_GMs=None,
@@ -378,75 +405,79 @@ def _get_filenames(mode='normal',
 
     if mode == 'FS':
         # Set SUBJECTS_DIR
-        sdir = os.getenv('SDIR') if FS_subjects_dir is None else os.path.abspath(FS_subjects_dir)
+        sdir = os.getenv('SDIR') if subjects_dir is None else os.path.abspath(subjects_dir)
         if sdir is None:
             _error('Must set subjects directory with --sd or SDIR env variable.')
 
-        # Get list of subjects
-        subjects = FS_subject_ids
-        if subjects is None or len(subjects) == 0:
-            subjects = glob.glob(f'{sdir}/*/mri')
-            subjects = [os.path.basename(x.replace(f'/mri', '')) for x in subjects]
-            subjects = [x for x in subjects if x != 'fsaverage']
+        # Get list of src_subjects
+        if src_subjects is None or len(src_subjects) == 0:
+            src_subjects = glob.glob(f'{sdir}/*/mri')
+            src_subjects = [os.path.basename(x.replace(f'/mri', '')) for x in src_subjects]
+            src_subjects = [x for x in src_subjects if x != 'fsaverage']
+
+        trg_subjects = src_subjects if trg_subjects is None else trg_subjects
 
         # Required inputs
-        def _parse_filenames(dirname, subjects, subdir, fbase):
+        def _parse_filenames(dirname, src_subjects, subdir, fbase):
             if not _is_basename(fbase):
                 _error(f'{fbase} must be provided as a basename (e.g., {os.path.basename(fbase)}')
-
             fnames = []
-            for s in subjects:
+            for s in src_subjects:
                 fname = os.path.join(dirname, s, subdir, fbase)
                 if not os.path.isfile(fname):
                     _error(f'{fname} does not exist :(')
                 fnames += [fname]
             return fnames
 
-        parcellations = _parse_filenames(sdir, subjects, 'mri', parcellation)
-        skullstrips = _parse_filenames(sdir, subjects, 'mri', skullstrip)
+        parcellations = _parse_filenames(sdir, src_subjects, 'mri', parcellation)
+        skullstrips = _parse_filenames(sdir, src_subjects, 'mri', skullstrip)
 
         hemis_template_paths = None if hemis_template is None else _parse_filenames(
-            sdir, subjects, 'mri', hemis_template
+            sdir, src_subjects, 'mri', hemis_template
         )
 
-        output_dir = [
+        output_dirs = [
             os.path.join(sdir, s, 'RBSA') if output_dir is None
-            else os.path.join(output_dir, s) for s in subjects
+            else os.path.join(output_dir, trg) for trg in trg_subjects
         ]
-        for dirname in output_dir:  os.makedirs(dirname, exist_ok=True)        
+        for dirname in output_dirs:  os.makedirs(dirname, exist_ok=True)
+
+        warps = [os.path.join(dirname, warp) for dirname in output_dirs]
         
         # Target data
         in_image_paths = None if input_images is None else list(
-            map(list, zip(*[_parse_filenames(sdir, subjects, 'mri', x) for x in input_images]))
+            map(list, zip(*[_parse_filenames(sdir, src_subjects, 'mri', x) for x in input_images]))
         )
         out_image_paths = [ # TO-DO:  add the ability to provide output paths too
             [os.path.join(dirname, _add_tag(x, 'RBSA')) for x in input_images]
-            for dirname in output_dir
+            for dirname in output_dirs
         ] if input_images is not None else None
-        
+
         in_GM_paths = None if input_GMs is None else list(
-            map(list, zip(*[_parse_filenames(sdir, subjects, 'surf', x) for x in input_GMs]))
+            map(list, zip(*[_parse_filenames(sdir, src_subjects, 'surf', x) for x in input_GMs]))
         )
         out_GM_paths = [
             [os.path.join(dirname, _add_tag(x, 'RBSA')) for x in input_GMs]
-            for dirname in output_dir
+            for dirname in output_dirs
         ] if input_GMs is not None else None
         
         in_WM_paths = None if input_WMs is None else list(
-            map(list, zip(*[_parse_filenames(sdir, subjects, 'surf', x) for x in input_WMs]))
+            map(list, zip(*[_parse_filenames(sdir, src_subjects, 'surf', x) for x in input_WMs]))
         )
         out_WM_paths = [
             [os.path.join(dirname, _add_tag(x, 'RBSA')) for x in input_WMs]
-            for dirname in output_dir
+            for dirname in output_dirs
         ] if input_WMs is not None else None
-        
+
         # Compile into list dictionary w/ all filenames (1 dict per subject)
         out_dicts = []
-        for n, _ in enumerate(subjects):
+        for n, _ in enumerate(src_subjects):
             sdict = {}
             sdict['parcellation'] = parcellations[n]
             sdict['skullstrip'] = skullstrips[n]
-            sdict['output_dir'] = output_dir[n]
+            sdict['output_dir'] = output_dirs[n]
+            sdict['output_basename'] = output_basename
+            sdict['warp'] = warps[n]
             sdict['input_images'] = in_image_paths[n] if in_image_paths is not None else None
             sdict['input_GMs'] = in_GM_paths[n] if in_GM_paths is not None else None
             sdict['input_WMs'] = in_WM_paths[n] if in_WM_paths is not None else None
@@ -466,20 +497,27 @@ def _get_filenames(mode='normal',
 
         # Required args
         out_dict['parcellation'] = parcellation if os.path.isfile(parcellation) else _error(
-            f'Input parcellation f{parcellation} does not exist'
+            f'Input parcellation {parcellation} does not exist'
         )
         out_dict['skullstrip'] = skullstrip if os.path.isfile(skullstrip) else _error(
-            f'Input skullstripped image f{skullstrip} does not exist'
+            f'Input skullstripped image {skullstrip} does not exist'
         )
         out_dict['hemis_template'] = (
             None if hemis_template is None
             else hemis_template if os.path.isfile(hemis_template)
-            else _error(f'Input hemis_template f{hemis_template} does not exist')
-        )        
+            else _error(f'Input hemis_template {hemis_template} does not exist')
+        )
 
         out_dict['output_dir'] = output_dir
+        out_dict['output_basename'] = output_basename
         os.makedirs(output_dir, exist_ok=True)
 
+        out_dict['warp'] = (
+            None if warp is None
+            else warp if not _is_basename(warp)
+            else os.path.join(output_dir, warp)
+        )                      
+                              
         # Target data
         out_dict['input_images'] = None if input_images is None else [
             x if os.path.isfile(x) else _error(f'Input target file {x} does not exist')
@@ -499,7 +537,7 @@ def _get_filenames(mode='normal',
         out_dict['output_GMs'] = (
             None if input_GMs is None
             else output_GMs if output_GMs is not None
-            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.vtp')
+            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.vtk')
                   for x in input_GMs
             ]
         )
@@ -511,7 +549,7 @@ def _get_filenames(mode='normal',
         out_dict['output_WMs'] = (
             None if input_WMs is None
             else output_WMs if output_WMs is not None
-            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.vtp')
+            else [os.path.join(output_dir, f'{_split_ext(os.path.basename(x))[0]}.RBSA.vtk')
                   for x in input_WMs
             ]
         )
@@ -564,7 +602,7 @@ def _is_vtk_type_surface(inpath):
 
 def _split_ext(inpath):
     exts = ['.asc', '.ico', '.geo', '.gii', '.mgz', '.mgz', '.nifti',
-            '.nii', '.nii.gz', '.nrrd', '.stl', '.tri']
+            '.nii', '.nii.gz', '.nrrd', '.stl', '.tri', '.vtk', ',vtp']
     
     for ext in exts:
         if inpath[-len(ext):] == ext:

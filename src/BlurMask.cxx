@@ -3,50 +3,10 @@
 #include "utils.h"
 
 
-/*struct IndexHasher {
-  std::size_t operator()(const itk::Index<nDims>& idx) const {
-    std::size_t h1 = std::hash<long>()(idx[0]);
-    std::size_t h2 = std::hash<long>()(idx[1]);
-    std::size_t h3 = std::hash<long>()(idx[2]);
+//----------------------------------------------------------------------------------------------------
 
-    return h1 ^ (h2 << 1) ^ (h3 << 2);
-  }
-};
-
-struct IndexEqual {
-  bool operator()(const itk::Index<nDims>& a, const itk::Index<nDims>& b) const {
-    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
-  }
-  };*/
-
-
-
-UCharImageType::Pointer BinaryContourImage(UCharImageType::Pointer image)
-{
-  auto filter = BinaryContourImageFilterType::New();
-  filter->SetInput(image);
-  filter->SetForegroundValue(0);
-  filter->SetBackgroundValue(1);
-  filter->Update();
-
-  return filter->GetOutput();
-}
-
-
-UCharImageType::Pointer BinaryFillHoles(UCharImageType::Pointer image)
-{
-  auto filter = BinaryFillholeImageFilterType::New();
-  filter->SetInput(image);
-  filter->SetForegroundValue(1);
-  filter->Update();
-
-  return filter->GetOutput();
-}
-
-
-
-vtkSmartPointer<vtkPolyData> CreateLabelMesh
-(UCharImageType::Pointer labelMask, FloatImageType::Pointer distanceMap)
+vtkSmartPointer<vtkPolyData> CreateLabelMesh(TPointer<UCharImageType> labelMask,
+					     TPointer<FloatImageType> distanceMap)
 {
   auto mesh = vtkSmartPointer<vtkPolyData>::New();
   BinaryITKImageToVTKMesh(labelMask, mesh);
@@ -61,7 +21,7 @@ vtkSmartPointer<vtkPolyData> CreateLabelMesh
 
   itk::Point<double, nDims> x0;
   ContinuousIndexType cIdx;
-  UCharImageType::IndexType idx;
+  TIndex<UCharImageType> idx;
 
   auto interpolator = LinearInterpolateType<FloatImageType>::New();
   interpolator->SetInputImage(distanceMap);
@@ -72,7 +32,7 @@ vtkSmartPointer<vtkPolyData> CreateLabelMesh
         
     ContinuousIndexType cIdx =
       TransformNDimsDoubleToContinuousIndex<FloatImageType>(distanceMap, p0);
-    FloatImageType::IndexType idx = TransformNDimsDoubleToIndex<FloatImageType>(distanceMap, p0);
+    TIndex<FloatImageType> idx = TransformNDimsDoubleToIndex<FloatImageType>(distanceMap, p0);
 
     if(distanceMap->GetLargestPossibleRegion().IsInside(idx)) {
       unsigned char x = (interpolator->EvaluateAtContinuousIndex(cIdx) >= 0) ? 1 : 0; 
@@ -89,72 +49,39 @@ vtkSmartPointer<vtkPolyData> CreateLabelMesh
 }
 
 
-UCharImageType::Pointer LabelCSFEdgeMap
-(UCharImageType::Pointer labelMask, UCharImageType::Pointer brainMask)
+TPointer<UCharImageType> LabelCSFEdgeMap(TPointer<UCharImageType> labelMask,
+					 TPointer<UCharImageType> brainMask)
 {
   // Get contour map of brainMask
-  UCharImageType::Pointer fullEdgeMap = BinaryContourImage(brainMask);
-  fullEdgeMap = BinaryThresholdImage<UCharImageType>(fullEdgeMap, 0, 0, 0, 1);
-
+  TPointer<UCharImageType> fullEdgeMap;
+  {
+    auto filter = BinaryContourImageFilterType::New();
+    filter->SetInput(brainMask);
+    filter->SetForegroundValue(0);
+    filter->SetBackgroundValue(1);
+    filter->Update();
+    
+    fullEdgeMap = filter->GetOutput();
+    BinaryThresholdImageInPlace(fullEdgeMap, 0, 0);
+  }
+  
   // Isolate voxels of fullEdgeMap that touch labelMask
   BinaryBallStructuringElementType kernel;
   kernel.SetRadius(kernelRadius);
   kernel.CreateStructuringElement();
 
-  UCharImageType::Pointer mask1 = DilateImage(fullEdgeMap, kernel);
-  mask1 = MultiplyImages<UCharImageType>(mask1, labelMask);
+  TPointer<UCharImageType> mask1 = DilateImage(fullEdgeMap, kernel);
+  MultiplyImagesInPlace<UCharImageType>(mask1, labelMask);
 
   // Isolate voxels of labelMask that touch fullEdgeMap
-  UCharImageType::Pointer mask2 = DilateImage(labelMask, kernel);
-  mask2 = MultiplyImages<UCharImageType>(mask2, fullEdgeMap);
+  TPointer<UCharImageType> mask2 = DilateImage(labelMask, kernel);
+  MultiplyImagesInPlace<UCharImageType>(mask2, fullEdgeMap);
 
   // Combine and return
-  UCharImageType::Pointer labelEdgeMask = AddImages<UCharImageType>(mask1, mask2);
-
+  TPointer<UCharImageType> labelEdgeMask = AddImages<UCharImageType>(mask1, mask2);
   return labelEdgeMask;
 }
   
-
-float GetMaximumImageValue(FloatImageType::Pointer image)
-{
-  auto filter = MinimumMaximumImageCalculatorType::New();
-  filter->SetImage(image);
-  filter->Compute();
-
-  return filter->GetMaximum();
-}
-
-
-VectorImageType::Pointer Gradient(FloatImageType::Pointer image)
-{
-  auto filter = GradientImageFilterType::New();
-  filter->SetInput(image);
-  filter->Update();
-
-  return filter->GetOutput();
-}
-
-
-void NormalizeITKVector(VectorImageType::PixelType &vec)
-{
-  float sum = 0;
-  for(unsigned int d = 0; d < nDims; d++) {
-    sum += vec[d];
-  }
-  for(unsigned int d = 0; d < nDims; d++) {
-    vec[d] /= sum;
-  }
-}
-			       
-
-FloatImageType::Pointer SignedDistanceTransform(UCharImageType::Pointer image) {
-  auto filter = SignedMaurerDistanceMapImageFilterType::New();
-  filter->SetInput(image);
-  filter->Update();
-
-  return filter->GetOutput();
-}
-
 
 
 /*
@@ -163,50 +90,63 @@ FloatImageType::Pointer SignedDistanceTransform(UCharImageType::Pointer image) {
 
 BlurMaskGenerator::BlurMaskGenerator()
 {
-  this->m_pointCloud = vtkSmartPointer<vtkPoints>::New();
-  this->m_pointCloudLineMidpoints = vtkSmartPointer<vtkPolyData>::New();
-
-  this->m_pointCloudPointLineIds = vtkSmartPointer<vtkUnsignedIntArray>::New();
-  this->m_pointCloudPointLineIds->SetNumberOfComponents(1);
-
-  this->m_pointCloudLineInterpolationWeights = vtkSmartPointer<vtkFloatArray>::New();
-  this->m_pointCloudLineInterpolationWeights->SetNumberOfComponents(1);
-
-  this->m_pointCloudLines = vtkSmartPointer<vtkCellArray>::New();
   this->m_stepSize = 0.5;
-  this->m_nInterpolationPoints = 4;
+
+  // Initialize/reset vtk data
+  if(this->m_pointCloud) {
+    this->m_pointCloud->Initialize();
+  }
+  else {
+    this->m_pointCloud = vtkSmartPointer<vtkPoints>::New();
+  }
+
+  if(this->m_pointCloudLines) {
+    this->m_pointCloudLines->Initialize();
+  }
+  else {
+    this->m_pointCloudLines = vtkSmartPointer<vtkCellArray>::New();
+  }
 }
   
 
-void BlurMaskGenerator::Generate()
-//(UCharImageType::Pointer labelMask, UCharImageType::Pointer brainMask,
-// UCharImageType::Pointer skullStripMask)
+TPointer<UCharImageType> BlurMaskGenerator::Generate(TPointer<UCharImageType> labelMask,
+						     TPointer<UCharImageType> brainMask,
+						     TPointer<UCharImageType> skullStripMask)
 {
-  // Check for inputs
-  if(!this->m_labelMask) {
-    throw std::runtime_error("BlurMaskGenerator missing required input (LabelMask)");
-  }
-  if(!this->m_brainMask) {
-    throw std::runtime_error("BlurMaskGenerator missing required input (BrainMask)");
-  }
-  if(!this->m_skullStripMask) {
-    throw std::runtime_error("BlurMaskGenerator missing required input (SkullStripMask)");
+  // Get signed distance map of brainmask
+  TPointer<FloatImageType> distanceMap;
+  {
+    auto filter = SignedMaurerDistanceMapImageFilterType::New();
+    filter->SetInput(brainMask);
+    filter->Update();
+
+    distanceMap = filter->GetOutput();
+    distanceMap->DisconnectPipeline();
   }
 
-  // Get signed distance transform/gradient and edges from brainMask
-  FloatImageType::Pointer distanceMap = SignedDistanceTransform(this->m_brainMask);
-  VectorImageType::Pointer distanceGrad = Gradient(distanceMap);
-  this->m_blurMask = LabelCSFEdgeMap(this->m_labelMask, this->m_brainMask);
+  // Get gradient of signed distance
+  TPointer<VectorImageType> distanceGrad;
+  {
+    auto filter = GradientImageFilterType::New();
+    filter->SetInput(distanceMap);
+    filter->Update();
+    
+    distanceGrad = filter->GetOutput();
+    distanceGrad->DisconnectPipeline();
+  }
+
+  // Initialize the blur mask w/ the CSF voxels bordering the target label mask
+  TPointer<UCharImageType> blurMask = LabelCSFEdgeMap(labelMask, brainMask);
   
   // Convert edge map to vtkPolyData (to get a set of points and normals on edge)
-  this->m_labelMesh = CreateLabelMesh(this->m_labelMask, distanceMap);
+  vtkSmartPointer<vtkPolyData> labelMesh = CreateLabelMesh(labelMask, distanceMap);
   vtkSmartPointer<vtkUnsignedCharArray> isEdge =
-    vtkUnsignedCharArray::SafeDownCast(this->m_labelMesh->GetPointData()->GetArray("Is edge"));
-  vtkSmartPointer<vtkDataArray> normals = this->m_labelMesh->GetPointData()->GetNormals();
+    vtkUnsignedCharArray::SafeDownCast(labelMesh->GetPointData()->GetArray("Is edge"));
+  vtkSmartPointer<vtkDataArray> normals = labelMesh->GetPointData()->GetNormals();
 
   // Initialize pointCloud (points) and pointCloudLines (cell array)
   unsigned int nEdgePoints = 0;
-  for(unsigned int p = 0; p < this->m_labelMesh->GetNumberOfPoints(); p++) {
+  for(unsigned int p = 0; p < labelMesh->GetNumberOfPoints(); p++) {
     if(isEdge->GetValue(p) > 0) {
       nEdgePoints++;
     }
@@ -214,28 +154,32 @@ void BlurMaskGenerator::Generate()
   this->m_pointCloud->Allocate(nEdgePoints);
   this->m_pointCloudLines->AllocateEstimate(nEdgePoints, 2);
 
-  // Fill the CSF around the label w/ an ordered point cloud
+  // Set up iterators
   auto brainMaskInterpolator = LinearInterpolateType<UCharImageType>::New();
-  brainMaskInterpolator->SetInputImage(this->m_brainMask);
+  brainMaskInterpolator->SetInputImage(brainMask);
+
   auto distanceMapInterpolator = LinearInterpolateType<FloatImageType>::New();
   distanceMapInterpolator->SetInputImage(distanceMap);
+
   auto distanceGradInterpolator = LinearInterpolateType<VectorImageType>::New();
   distanceGradInterpolator->SetInputImage(distanceGrad);
-  auto skullStripMaskInterpolator = LinearInterpolateType<UCharImageType>::New();
-  skullStripMaskInterpolator->SetInputImage(this->m_skullStripMask);
 
+  auto skullStripMaskInterpolator = LinearInterpolateType<UCharImageType>::New();
+  skullStripMaskInterpolator->SetInputImage(skullStripMask);
+
+  // Fill the CSF around the label w/ an ordered point cloud
   unsigned int pointId = 0, lineId = 0;
-  double x0[nDims], direction[nDims], xt[nDims], x1[nDims];
   
-  for(unsigned int p = 0; p < this->m_labelMesh->GetNumberOfPoints(); p++) {
+  for(unsigned int p = 0; p < labelMesh->GetNumberOfPoints(); p++) {
     if(isEdge->GetValue(p) == 1) {
       // Initialize
-      this->m_labelMesh->GetPoint(p, x0);
-      this->m_labelMesh->GetPoint(p, xt);
+      double x0[nDims], direction[nDims], xt[nDims], x1[nDims];
+      labelMesh->GetPoint(p, x0);
+      labelMesh->GetPoint(p, xt);
       normals->GetTuple(p, direction);
       
       ContinuousIndexType cIdxt =
-	TransformNDimsDoubleToContinuousIndex<UCharImageType>(this->m_blurMask, xt);
+	TransformNDimsDoubleToContinuousIndex<UCharImageType>(blurMask, xt);
       float Dxt = distanceMapInterpolator->EvaluateAtContinuousIndex(cIdxt);
       
       // Traverse along normal from p0 to edge of skullStripMask
@@ -252,7 +196,7 @@ void BlurMaskGenerator::Generate()
 	
 	// Still travelling down the distance map gradient?
 	ContinuousIndexType cIdx1 =
-	  TransformNDimsDoubleToContinuousIndex<UCharImageType>(this->m_blurMask, x1);
+	  TransformNDimsDoubleToContinuousIndex<UCharImageType>(blurMask, x1);
         float Dx1 = distanceMapInterpolator->EvaluateAtContinuousIndex(cIdx1);
 
 	// Are we too close to adjacent tissue?
@@ -262,21 +206,21 @@ void BlurMaskGenerator::Generate()
 	}
 
 	// Still inside skull strip mask?
-	if(!this->m_skullStripMask->GetLargestPossibleRegion().IsInside(cIdx1)
+	if(!skullStripMask->GetLargestPossibleRegion().IsInside(cIdx1)
 	   || skullStripMaskInterpolator->EvaluateAtContinuousIndex(cIdx1) < 0.5) {
 	  insideSkullStrip = false;
 	  continue;
 	}
 
 	// Update mask
-	UCharImageType::IndexType idx =
-	  TransformNDimsDoubleToIndex<UCharImageType>(this->m_blurMask, x1);
-	this->m_blurMask->SetPixel(idx, 1);
+	TIndex<UCharImageType> idx =
+	  TransformNDimsDoubleToIndex<UCharImageType>(blurMask, x1);
+	blurMask->SetPixel(idx, 1);
 
 	// Reset for next iteration
 	for(unsigned int d = 0; d < nDims; d++) {
 	  xt[d] = x1[d];
-	  cIdxt[d] = cIdx1[1];
+	  cIdxt[d] = cIdx1[d];
 	}
 	Dxt = Dx1;	
 	isValidLine = true;
@@ -297,157 +241,108 @@ void BlurMaskGenerator::Generate()
       }
     }
   }
-    
+
   // Get final mask
-  this->m_blurMask = MultiplyImages<UCharImageType>(this->m_blurMask, this->m_skullStripMask);
-
-  this->m_outputMask = AddImages<UCharImageType>(this->m_labelMask, this->m_blurMask);
-  this->m_outputMask = BinaryThresholdImage<UCharImageType>
-    (this->m_outputMask, 1, std::numeric_limits<unsigned char>::max(), 0, 1);
-}
-
-
-void BlurMaskGenerator::BuildInterpolationMetaData
-(UCharImageType::Pointer referenceBlurMask, UCharImageType::Pointer referenceLabelMask)
-{
-  // Blur mask to apply to warps (probably higher res than original)
-  this->m_labelMaskToApply = referenceLabelMask;
-  this->m_blurMaskToApply =
-    SubtractImages<UCharImageType>(referenceBlurMask, this->m_labelMaskToApply);
-
-  // Set up iterators
-  auto pointCloudLineIterator = vtk::TakeSmartPointer(this->m_pointCloudLines->NewIterator());
-  vtkNew<vtkIdList> linePointIds;
-  linePointIds->Allocate(2);
-
-  ImageRegionIteratorWithIndexType<UCharImageType>
-    maskIterator(this->m_blurMaskToApply, this->m_blurMaskToApply->GetLargestPossibleRegion());
+  MultiplyImagesInPlace<UCharImageType>(blurMask, skullStripMask);
+  AddImagesInPlace<UCharImageType>(blurMask, labelMask);
+  BinaryThresholdImageInPlace(blurMask);
   
-  // Precompute line distances for each voxel in this->m_blurMaskToApply
-  const unsigned int& nLines = this->m_pointCloudLines->GetNumberOfCells();
-  const unsigned int N = std::min(this->m_nInterpolationPoints, nLines);
-
-  InterpolationMetadata interpolationMetaData;
-
-  for(maskIterator.GoToBegin(); !maskIterator.IsAtEnd(); ++maskIterator) {
-    if(maskIterator.Get() != 1) continue;
-
-    // Get index as phyiscal point
-    UCharImageType::IndexType index = maskIterator.GetIndex();
-    double indexPoint[nDims];
-    TransformIndexToNDimsDouble<UCharImageType>(referenceLabelMask, index, indexPoint);
-
-    // Get closest distance from indexPoint to each line in pointCloudLines
-    std::vector<LineMetaData> pointCloudLineMetaData;
-    pointCloudLineMetaData.reserve(nLines);
-    pointCloudLineIterator->GoToFirstCell();
-    
-    while(!pointCloudLineIterator->IsDoneWithTraversal()) {
-      linePointIds->Reset();
-      pointCloudLineIterator->GetCurrentCell(linePointIds);
-      unsigned int lineId = pointCloudLineIterator->GetCurrentCellId();
-
-      double p0[nDims], p1[nDims];
-      this->m_pointCloud->GetPoint(linePointIds->GetId(0), p0);
-      this->m_pointCloud->GetPoint(linePointIds->GetId(1), p1);
-      
-      double t;
-      double dist2 = vtkLine::DistanceToLine(indexPoint, p0, p1, t, nullptr);
-      pointCloudLineMetaData.emplace_back(lineId, dist2, t);
-
-      pointCloudLineIterator->GoToNextCell();
-    }
-
-    // Sort interpolationPointData by smallest to largest dist2 and keep smallest
-    std::partial_sort(pointCloudLineMetaData.begin(),
-		      pointCloudLineMetaData.begin() + N,
-		      pointCloudLineMetaData.end(),
-		      [](const auto& a, const auto& b) { return std::get<1>(a) < std::get<1>(b); });
-    pointCloudLineMetaData.resize(N);
-    
-    // Normalize the distances for each voxel
-    double totalDist = 0.0;
-
-    for(unsigned int n = 0; n < N; n++) {
-      double& dist = std::get<1>(pointCloudLineMetaData.at(n));      
-      dist = std::sqrt(dist);
-      totalDist += dist;
-    }
-
-    if(totalDist > 0) {
-      for(unsigned int n = 0; n < this->m_nInterpolationPoints; n++) {
-	std::get<1>(pointCloudLineMetaData.at(n)) /= totalDist;
-      }
-    }
-
-    // Add to meta data
-    this->m_interpolationMetaData[index] = std::move(pointCloudLineMetaData);
-  }
+  return blurMask;
 }
 
 
 // Apply blur mask to warp
-VectorImageType::Pointer BlurMaskGenerator::ApplyToWarp(VectorImageType::Pointer warp)
+TPointer<VectorImageType> BlurMaskGenerator::ApplyToWarp(TPointer<VectorImageType> warp,
+							 TPointer<UCharImageType> blurMask,
+							 TPointer<UCharImageType> labelMask)
 {
-  // Iterate over pointCloudLines to interpolate field value at line origin
+  // Take only CSF voxels of blur mask
+  TPointer<UCharImageType> CSFMask = SubtractImages<UCharImageType>(blurMask, labelMask);
+  TRegion<UCharImageType> CSFMaskRegion = CSFMask->GetLargestPossibleRegion();
+    
+  // Iterate over point cloud lines to get endpoint coordinates and warp value at p0
   const unsigned int& nLines = this->m_pointCloudLines->GetNumberOfCells();
-  const unsigned int N = std::min(this->m_nInterpolationPoints, nLines);
 
-  std::unordered_map<unsigned int, VectorImageType::PixelType> interpolationValues;
-  interpolationValues.reserve(nLines);
-  
-  auto warpInterpolator = LinearInterpolateType<VectorImageType>::New();
-  warpInterpolator->SetInputImage(warp);
+  std::vector<std::array<double, nDims>> linePoint0(nLines), linePoint1(nLines);
+  std::vector<TPixel<VectorImageType>> warpValuesAtP0s(nLines);
+  {
+    auto interpolator = LinearInterpolateType<VectorImageType>::New();
+    interpolator->SetInputImage(warp);
 
-  auto pointCloudLineIterator = vtk::TakeSmartPointer(this->m_pointCloudLines->NewIterator());
-  pointCloudLineIterator->GoToFirstCell();
+    auto iterator = vtk::TakeSmartPointer(this->m_pointCloudLines->NewIterator());
+    vtkNew<vtkIdList> linePointIds;
+    linePointIds->Allocate(2);
 
-  vtkNew<vtkIdList> linePointIds;
-  linePointIds->Allocate(2);
+    for(iterator->GoToFirstCell(); !iterator->IsDoneWithTraversal(); iterator->GoToNextCell())
+      {
+        linePointIds->Reset();
+        iterator->GetCurrentCell(linePointIds);
 
-  while(!pointCloudLineIterator->IsDoneWithTraversal()) {
-    linePointIds->Reset();
-    pointCloudLineIterator->GetCurrentCell(linePointIds);
-    unsigned int lineId = pointCloudLineIterator->GetCurrentCellId();
+	// Cache endpoints of line
+        unsigned int lineId = iterator->GetCurrentCellId();
+        this->m_pointCloud->GetPoint(linePointIds->GetId(0), linePoint0[lineId].data());
+        this->m_pointCloud->GetPoint(linePointIds->GetId(1), linePoint1[lineId].data());
 
-    double p0[nDims];
-    this->m_pointCloud->GetPoint(linePointIds->GetId(0), p0);
-
-    ContinuousIndexType cIdx = TransformNDimsDoubleToContinuousIndex<VectorImageType>(warp, p0);
-    interpolationValues[lineId] = warpInterpolator->EvaluateAtContinuousIndex(cIdx);
-
-    pointCloudLineIterator->GoToNextCell();
-  }
-
-  // Mask field to just the label region and get CSF blur mask
-  VectorImageType::Pointer warpMasked = MaskImage<VectorImageType>(warp, this->m_labelMaskToApply);
-
-  // Set field values within blur mask
-  ImageRegionIteratorWithIndexType<UCharImageType>
-    maskIterator(this->m_blurMaskToApply, this->m_blurMaskToApply->GetLargestPossibleRegion());
-  maskIterator.GoToBegin();
-  
-  for(maskIterator.GoToBegin(); !maskIterator.IsAtEnd(); ++maskIterator) {
-    if(maskIterator.Get() != 1) continue;
-
-    auto index = maskIterator.GetIndex();
-    const auto& indexMetaData = this->m_interpolationMetaData.at(index);
-
-    VectorImageType::PixelType maskedValue;
-    maskedValue.Fill(0.0);
-
-    for(const auto& lineData : indexMetaData) {
-      unsigned int lineId = std::get<0>(lineData);
-      double weight = std::get<1>(lineData);
-      double t = std::get<2>(lineData);
-      
-      VectorImageType::PixelType interpValue = interpolationValues.at(lineId);
-      for(unsigned int d = 0; d < nDims; d++) {
-	maskedValue[d] += interpValue[d] * abs(1 - t) * weight;
+	// Get field value at p0
+	ContinuousIndexType cIdx =
+	  TransformNDimsDoubleToContinuousIndex<VectorImageType>(warp, linePoint0[lineId].data());
+	warpValuesAtP0s.at(lineId) = interpolator->EvaluateAtContinuousIndex(cIdx);
       }
+  }
+  
+  // Set each pixel value in masked warp
+  TPointer<VectorImageType> warpMasked = MaskImage<VectorImageType>(warp, labelMask);
+  {
+    ImageRegionIteratorWithIndexType<UCharImageType> iterator(CSFMask, CSFMaskRegion);
+    iterator.GoToBegin();
+    
+    for(iterator.GoToBegin(); !iterator.IsAtEnd(); ++iterator) {
+      if(iterator.Get() != 1) continue;
+
+      // Get index as phyiscal point
+      const TIndex<UCharImageType>& index = iterator.GetIndex();
+      double indexPoint[nDims];
+      TransformIndexToNDimsDouble<UCharImageType>(labelMask, index, indexPoint);
+      
+      // Check all lines and keep the best N
+      ClosestNLines<nInterpolationPoints> closestLines;
+      
+      for(unsigned int lineId = 0; lineId < nLines; lineId++) {
+	double t;
+	const double* p0 = linePoint0.at(lineId).data();
+	const double* p1 = linePoint1.at(lineId).data();
+	const double dist2 = vtkLine::DistanceToLine(indexPoint, p0, p1, t, nullptr);
+	
+	closestLines.consider(lineId, static_cast<float>(dist2), static_cast<float>(t));
+      }
+
+      // Calculate interpolation weights corresponding to each line
+      const unsigned int nInterpolationLines = std::min(closestLines.N, nInterpolationPoints);
+      std::vector<float> weights(nInterpolationLines);
+      float w_norm = 0.f;
+      
+      for(unsigned int i = 0; i < nInterpolationLines; i++) {
+	const float w = 1.f / (eps + std::sqrt(closestLines.a[i].dist2));	
+	weights.at(i) = w * std::abs(1 - closestLines.a[i].t);
+	w_norm += w;
+      }
+
+      // Get new pixel value 
+      TPixel<VectorImageType> v;
+      v.Fill(0.0);
+
+      for(unsigned int i = 0; i < nInterpolationLines; i++) {
+	const TPixel<VectorImageType>& v_i = warpValuesAtP0s.at(closestLines.a[i].lineId);
+	const float w = weights.at(i) / w_norm;
+
+	for(unsigned int d = 0; d < nDims; d++) {  
+	  v[d] += v_i[d] * w;
+	}
+      }
+      warpMasked->SetPixel(index, v);
     }
-    warpMasked->SetPixel(index, maskedValue);
   }
 
+  warpMasked->DisconnectPipeline();
   return warpMasked;
 }

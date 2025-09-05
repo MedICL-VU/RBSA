@@ -12,7 +12,7 @@ const int kernelRadius = 1;
 
 // Type defs
 using BinaryBallStructuringElementType =
-  itk::BinaryBallStructuringElement<UCharImageType::PixelType, nDims>;
+  itk::BinaryBallStructuringElement<TPixel<UCharImageType>, nDims>;
 
 using BinaryDilateImageFilterType =
   itk::BinaryDilateImageFilter<UCharImageType, UCharImageType, BinaryBallStructuringElementType>;
@@ -22,22 +22,22 @@ using BinaryErodeImageFilterType =
 
 
 // Functions
-UCharImageType::Pointer DilateImage
-(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
- UCharImageType::PixelType value = 1);
+TPointer<UCharImageType> DilateImage(TPointer<UCharImageType> image,
+				    BinaryBallStructuringElementType kernel,
+				    TPixel<UCharImageType> value = 1);
 
-UCharImageType::Pointer ErodeImage
-(UCharImageType::Pointer image, BinaryBallStructuringElementType kernel,
- UCharImageType::PixelType value = 1);
+TPointer<UCharImageType> ErodeImage(TPointer<UCharImageType> image,
+				   BinaryBallStructuringElementType kernel,
+				   TPixel<UCharImageType> value = 1);
 
-UCharImageType::Pointer DilateErodeCorrection(UCharImageType::Pointer image);
+TPointer<UCharImageType> DilateErodeCorrection(TPointer<UCharImageType> image);
 
-UCharImageType::Pointer LocalizedAtrophy
-(UCharImageType::Pointer targetLabel, UCharImageType::Pointer referenceAdjacentLabel,
- unsigned int nIters);
+TPointer<UCharImageType> LocalizedAtrophy(TPointer<UCharImageType> targetLabel,
+					 TPointer<UCharImageType> referenceAdjacentLabel,
+					 unsigned int nIters);
 
-UCharImageType::Pointer ReplaceLabelInImage
-(UCharImageType::Pointer inputImage, UCharImageType::Pointer origLabelMask,
- UCharImageType::Pointer atrophyLabelMask);
+TPointer<UCharImageType> ReplaceLabelInImage(TPointer<UCharImageType> inputImage,
+					    TPointer<UCharImageType> origLabelMask,
+					    TPointer<UCharImageType> atrophyLabelMask);
 
 #endif

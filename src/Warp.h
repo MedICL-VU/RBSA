@@ -31,66 +31,6 @@
 #include "utils.h"
 
 
-class Warper {
- public:
-  Warper();
-
-  // Methods
-  void SetOriginalLabel(UCharImageType::Pointer image) { this->m_inputMovingImage = image; }
-  void SetAtrophyLabel(UCharImageType::Pointer image) { this->m_inputFixedImage = image; }
-  void SetRegistrationMask(UCharImageType::Pointer image) { this->m_metricMask = image; }
-  void ComputeTransform();
-
-  // Output warps
-  void SetWarp(VectorImageType::Pointer warp) { this->m_warp = warp; }
-  void SetInverseWarp(VectorImageType::Pointer warp) { this->m_inverseWarp = warp; }
-  VectorImageType::Pointer GetWarp() const { return this->m_warp; }
-  VectorImageType::Pointer GetInverseWarp() const { return this->m_inverseWarp; }
-
- private:
-  UCharImageType::Pointer m_inputFixedImage;
-  UCharImageType::Pointer m_inputMovingImage;
-  UCharImageType::Pointer m_metricMask;
-  VectorImageType::Pointer m_warp;
-  VectorImageType::Pointer m_inverseWarp;
-};
-
-//
-using DisplacementFieldTransformType = itk::DisplacementFieldTransform<float, nDims>;
-using InvertDisplacementFieldFilterType =
-  itk::InvertDisplacementFieldImageFilter<VectorImageType, VectorImageType>;
-
-using RegistrationMethodType =
-  itk::ImageRegistrationMethodv4<FloatImageType, FloatImageType, DisplacementFieldTransformType>;
-using GradientDescentOptimizerType = itk::GradientDescentOptimizerv4Template<float>;
-using MSQMetricType =
-  itk::MeanSquaresImageToImageMetricv4<FloatImageType, FloatImageType, FloatImageType, float>;
-using MaskObjectType = itk::ImageMaskSpatialObject<nDims>;
-
-using ResampleType = itk::ResampleImageFilter<FloatImageType, FloatImageType>;
-
-using PyramidType =
-  itk::RecursiveMultiResolutionPyramidImageFilter<FloatImageType, FloatImageType>;
-using BaseAdaptorPointer =
-  RegistrationMethodType::TransformParametersAdaptorsContainerType::value_type;
-using DisplacementFieldTransformParametersAdaptorType =
-  itk::DisplacementFieldTransformParametersAdaptor<DisplacementFieldTransformType>;
-
-
-// Applying the transforms
-using WarpImageFilterType = itk::WarpImageFilter<FloatImageType, FloatImageType, VectorImageType>;
-
-std::array<VectorImageType::Pointer, 2> CombineWarps(std::vector<RBSAOutTuple> warpData);
-
-FloatImageType::Pointer WarpImage
-(FloatImageType::Pointer image, VectorImageType::Pointer warp);
-
-vtkSmartPointer<vtkPolyData> WarpSurface
-(vtkSmartPointer<vtkPolyData> inputSurface, VectorImageType::Pointer warp,
- UCharImageType::Pointer mask, bool convertFromRAS = false, bool checkMask = false);
-
-	  
-
 // Custom observer for registration
 template <typename TOptimizer>
 class RegistrationObserver : public itk::Command {
@@ -131,6 +71,42 @@ class RegistrationObserver : public itk::Command {
   unsigned int m_currentLevel = 0;
 };
 
+
+
+// Type defs
+using DisplacementFieldTransformType = itk::DisplacementFieldTransform<float, nDims>;
+
+using RegistrationMethodType =
+  itk::ImageRegistrationMethodv4<FloatImageType, FloatImageType, DisplacementFieldTransformType>;
+
+using GradientDescentOptimizerType = itk::GradientDescentOptimizerv4Template<float>;
+
+using MaskObjectType = itk::ImageMaskSpatialObject<nDims>;
+using MSQMetricType =
+  itk::MeanSquaresImageToImageMetricv4<FloatImageType, FloatImageType, FloatImageType, float>;
+
+using BaseAdaptorPointer =
+  RegistrationMethodType::TransformParametersAdaptorsContainerType::value_type;
+
+using DisplacementFieldTransformParametersAdaptorType =
+  itk::DisplacementFieldTransformParametersAdaptor<DisplacementFieldTransformType>;
+
+using PyramidType =
+  itk::RecursiveMultiResolutionPyramidImageFilter<FloatImageType, FloatImageType>;
+
+using WarpImageFilterType = itk::WarpImageFilter<FloatImageType, FloatImageType, VectorImageType>;
+
+
+// Functions
+TPointer<VectorImageType> RegisterLabelMasks
+(TPointer<UCharImageType> fixedInput, TPointer<UCharImageType> movingInput);
+
+TPointer<FloatImageType> WarpImage
+(TPointer<FloatImageType> image, TPointer<VectorImageType> warp);
+
+vtkSmartPointer<vtkPolyData> WarpSurface
+(vtkSmartPointer<vtkPolyData> inputSurface, TPointer<VectorImageType> warp,
+ TPointer<UCharImageType> mask, bool isRAS = false, bool checkMask = false);
 
 
 #endif

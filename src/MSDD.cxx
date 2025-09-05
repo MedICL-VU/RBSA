@@ -3,8 +3,8 @@
 
 //------------------
 
-void CalculateSurfaceDistance
-(vtkSmartPointer<vtkPolyData> surface0, vtkSmartPointer<vtkPolyData> surface1)
+void CalculateSurfaceDistance(vtkSmartPointer<vtkPolyData> surface0,
+			      vtkSmartPointer<vtkPolyData> surface1)
 {
   const unsigned int& nPoints = surface0->GetNumberOfPoints();
   
@@ -66,17 +66,18 @@ float GetMeanDistanceWithinLabel(vtkSmartPointer<vtkPolyData> surface, const int
 }
 
 
-UCharImageType::Pointer MakeBinaryMask
-(IntImageType::Pointer ref, const std::vector<int>& labels, UCharImageType::Pointer mask)
+TPointer<UCharImageType> MakeBinaryMask(TPointer<IntImageType> ref,
+				       const std::vector<int>& labels,
+				       TPointer<UCharImageType> mask)
 {
   if(!mask) {
     mask = InitializeZeroFilledImage<IntImageType, UCharImageType>(ref);
   }
   for(const auto& label : labels) {
-    UCharImageType::Pointer temp = BinaryThresholdImage<IntImageType>(ref, label, label, 0, 1);
-    mask = AddImages<UCharImageType>(temp, mask);
+    TPointer<UCharImageType> temp = BinaryThresholdImage<IntImageType>(ref, label, label);
+    AddImagesInPlace<UCharImageType>(mask, temp);
   }
-  mask = BinaryThresholdImage<UCharImageType>(mask, 1, 1, 0, 1);
+  BinaryThresholdImageInPlace(mask, 1, 1);
 
   return mask;
 }
@@ -100,36 +101,35 @@ MSDD::MSDD()
 };
 
 
-void MSDD::MakeHemiTemplates
-(IntImageType::Pointer mask, const std::vector<int>& lGMs, const std::vector<int>& lWMs,
- const std::vector<int>& rGMs, const std::vector<int>& rWMs)
+void MSDD::MakeHemiTemplates(TPointer<IntImageType> mask,
+			     const std::vector<int>& lGMs,
+			     const std::vector<int>& lWMs,
+			     const std::vector<int>& rGMs,
+			     const std::vector<int>& rWMs)
 {
-  // Left WM
-  this->m_lMaskWM = MakeBinaryMask(mask, lWMs);  
-  if(ImageSum<UCharImageType>(this->m_lMaskWM) == 0) {
+  // Make templates
+  this->m_lMaskWM = MakeBinaryMask(mask, lWMs);
+  this->m_lMaskGM = DuplicateImage<UCharImageType>(this->m_lMaskWM);
+  this->m_lMaskGM = MakeBinaryMask(mask, lGMs, this->m_lMaskGM);
+
+  this->m_rMaskWM = MakeBinaryMask(mask, rWMs);
+  this->m_rMaskGM = DuplicateImage<UCharImageType>(this->m_rMaskWM);
+  this->m_rMaskGM = MakeBinaryMask(mask, rGMs, this->m_rMaskGM);
+
+  // Double check
+  if(ImageSum<UCharImageType>(this->m_lMaskWM) == 0.f) {
     std::cerr << "Error: input hemis template does not contain any provided labels for lh WM\n";
     return;
   }
-  
-  // Left GM
-  this->m_lMaskGM = DuplicateImage<UCharImageType>(this->m_lMaskWM);
-  this->m_lMaskGM =  MakeBinaryMask(mask, lGMs, this->m_lMaskGM);
-  if(ImageSum<UCharImageType>(this->m_lMaskGM) == 0) {
+  if(ImageSum<UCharImageType>(this->m_lMaskGM) == 0.f) {
     std::cerr << "Error: input hemis template does not contain any provided labels for lh GM\n";
     return;
   }
-
-  // Right WM
-  this->m_rMaskWM = MakeBinaryMask(mask, rWMs);
-  if(ImageSum<UCharImageType>(this->m_rMaskWM) == 0) {
+  if(ImageSum<UCharImageType>(this->m_rMaskWM) == 0.f) {
     std::cerr << "Error: input hemis template does not contain any provided labels for rh WM\n";
     return;
   }
-
-  // Left GM
-  this->m_rMaskGM = DuplicateImage<UCharImageType>(this->m_rMaskWM);
-  this->m_rMaskGM = MakeBinaryMask(mask, rGMs, this->m_rMaskGM);
-  if(ImageSum<UCharImageType>(this->m_rMaskGM) == 0) {
+  if(ImageSum<UCharImageType>(this->m_rMaskGM) == 0.f) {
     std::cerr << "Error: input hemis template does not contain any provided labels for rh GM\n";
     return;
   }
@@ -166,13 +166,13 @@ void MSDD::GetLabelHemis()
   right.reserve(nLabels);
   
   for(const auto& label : this->m_labels) {
-    UCharImageType::Pointer labelMask =
-      BinaryThresholdImage<IntImageType>(this->m_parc, label, label, 0, 1);
-    UCharImageType::Pointer lMask = MultiplyImages<UCharImageType>(this->m_lMaskGM, labelMask);
-    UCharImageType::Pointer rMask = MultiplyImages<UCharImageType>(this->m_rMaskGM, labelMask);
+    TPointer<UCharImageType> labelMask =
+      BinaryThresholdImage<IntImageType>(this->m_parc, label, label);
+    TPointer<UCharImageType> lMask = MultiplyImages<UCharImageType>(this->m_lMaskGM, labelMask);
+    TPointer<UCharImageType> rMask = MultiplyImages<UCharImageType>(this->m_rMaskGM, labelMask);
 
-    const UCharImageType::PixelType& lSum = ImageSum<UCharImageType>(lMask);
-    const UCharImageType::PixelType& rSum = ImageSum<UCharImageType>(rMask);
+    const float& lSum = ImageSum<UCharImageType>(lMask);
+    const float& rSum = ImageSum<UCharImageType>(rMask);
 
     if(lSum > rSum) {
       left.emplace_back(label);

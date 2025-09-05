@@ -13,13 +13,15 @@ class MSDD {
 
   // Inputs
   void SetTargetLabels(const std::vector<int>& labels) { this->m_labels = labels; }
-  void SetCorticalParcellation(IntImageType::Pointer image) { this->m_parc = image; }
-  void SetWarp(VectorImageType::Pointer warp) { this->m_warp = warp; }
-  void SetWarpMask(UCharImageType::Pointer mask) { this->m_warpMask = mask; }
+  void SetCorticalParcellation(TPointer<IntImageType> image) { this->m_parc = image; }
+  void SetWarp(TPointer<VectorImageType> warp) { this->m_warp = warp; }
+  void SetWarpMask(TPointer<UCharImageType> mask) { this->m_warpMask = mask; }
 
-  void MakeHemiTemplates
-  (IntImageType::Pointer mask, const std::vector<int>& lGMs, const std::vector<int>& lWMs,
-   const std::vector<int>& rGMs, const std::vector<int>& rWMs);
+  void MakeHemiTemplates(TPointer<IntImageType> mask,
+			 const std::vector<int>& lGMs,
+			 const std::vector<int>& lWMs,
+			 const std::vector<int>& rGMs,
+			 const std::vector<int>& rWMs);
 
   // Main methods
   void CreateCustomParcellation();
@@ -34,22 +36,22 @@ class MSDD {
   std::vector<float> m_MSDDs;
   
   int m_defaultPixelValue;
-  IntImageType::Pointer m_parc;
-  VectorImageType::Pointer m_warp;
-  UCharImageType::Pointer m_warpMask;
+  TPointer<IntImageType> m_parc;
+  TPointer<VectorImageType> m_warp;
+  TPointer<UCharImageType> m_warpMask;
   
-  UCharImageType::Pointer m_lMaskGM, m_lMaskWM, m_rMaskGM, m_rMaskWM;  
+  TPointer<UCharImageType> m_lMaskGM, m_lMaskWM, m_rMaskGM, m_rMaskWM;  
   vtkSmartPointer<vtkPolyData> m_lGM0, m_lWM0, m_lGM1, m_lWM1, m_rGM0, m_rWM0, m_rGM1, m_rWM1;
 };
 
 
-void CalculateSurfaceDistance
-(vtkSmartPointer<vtkPolyData> surface0, vtkSmartPointer<vtkPolyData> surface1);
+void CalculateSurfaceDistance(vtkSmartPointer<vtkPolyData> surface0,
+			      vtkSmartPointer<vtkPolyData> surface1);
 
 float GetMeanDistanceWithinLabel(vtkSmartPointer<vtkPolyData> surface, const int& label);
 
-UCharImageType::Pointer MakeBinaryMask
-(IntImageType::Pointer ref, const std::vector<int>& labels,
- UCharImageType::Pointer mask = nullptr);
+TPointer<UCharImageType> MakeBinaryMask(TPointer<IntImageType> ref,
+					const std::vector<int>& labels,
+					TPointer<UCharImageType> mask = nullptr);
 
 #endif

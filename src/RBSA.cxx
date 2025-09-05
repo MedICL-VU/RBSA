@@ -5,22 +5,90 @@
 RBSA::RBSA(){}
 
 
-RBSAOutputTuple RBSA::GenerateAtrophyTransforms(unsigned int targetLabel)
+void RBSA::SetInputParcellation(TPointer<IntImageType> parc)
 {
-  // Create label mask for original timepoint
-  UCharImageType::Pointer origLabelMask =
-    BinaryThresholdImage<IntImageType>(m_parcellation, targetLabel, targetLabel, 0, 1);
+  // Parcellation
+  this->m_parc = parc;
+
+  // Brain mask
+  this->m_brainMask = BinaryThresholdImage<IntImageType>(this->m_parc);
+  
+  // Composite outputs
+  this->m_countImage = InitializeZeroFilledImage<IntImageType, IntImageType>(parc);
+  this->m_warp = InitializeZeroFilledImage<IntImageType, VectorImageType>(parc);
+}
+
+void RBSA::SetSkullStripMask(TPointer<UCharImageType> mask)
+{
+  auto filter = BinaryFillHolesFilterType::New();
+  filter->SetInput(mask);
+  filter->SetForegroundValue(1);
+  filter->Update();
+
+  this->m_skullStripMask = filter->GetOutput();
+  this->m_skullStripMask->DisconnectPipeline();
+}
+
+
+
+void RBSA::SetTargetLabels(const std::vector<TPixel<IntImageType>>& inputLabels)
+{
+  this->m_targetLabels.reserve(inputLabels.size());
+
+  // Check if labels exist in this->m_parc
+  for(const auto& label : inputLabels) {
+    if(IsLabelInImage<IntImageType>(this->m_parc, label)) {
+      this->m_targetLabels.emplace_back(label);
+    }
+    else {
+      std::cerr << label << " does not exist within the input parcellation :(" << std::endl;
+    }
+  }
+}
+
+
+void RBSA::SetWMLabels(const std::vector<TPixel<IntImageType>>& inputLabels)
+{
+  std::vector<int> wmLabels;
+  this->m_wmMask = InitializeZeroFilledImage<IntImageType, UCharImageType>(this->m_parc);
+  
+  // Check if labels exist in this->m_parc
+  for(const auto& label : inputLabels) {
+    if(IsLabelInImage<IntImageType>(this->m_parc, label)) {
+      wmLabels.emplace_back(label);
+    }
+    else {
+      std::cerr << label << " does not exist within the input parcellation :(" << std::endl;
+    }
+  }
+
+  // Create mask with only WM labels
+  for(const auto& label : wmLabels) {
+    TPointer<UCharImageType> temp = BinaryThresholdImage<IntImageType>(this->m_parc, label, label);
+    AddImagesInPlace<UCharImageType>(this->m_wmMask, temp);
+  }
+  
+  this->m_wmMask->DisconnectPipeline();
+}
+
+
+void RBSA::GenerateTransformForLabel(unsigned int label)
+{
+  // Check if labels exist in this->m_parc
+  if(!IsLabelInImage<IntImageType>(this->m_parc, label)) {
+    std::cerr << label << " does not exist within the input parcellation :(" << std::endl;
+    return;
+  }
+
+  // Create original label mask
+  auto origLabelMask = BinaryThresholdImage<IntImageType>(this->m_parc, label, label);
 
   // Get the blur mask data
-  BlurMaskGenerator blurMaskGenerator;
-  blurMaskGenerator.SetLabelMask(origLabelMask);
-  blurMaskGenerator.SetBrainMask(m_brainMask);
-  blurMaskGenerator.SetSkullStripMask(m_skullStripMask);
-  blurMaskGenerator.SetStepSize(0.5);
-  blurMaskGenerator.Generate();
+  BlurMaskGenerator Blur;
+  Blur.SetStepSize(0.5);
 
-  UCharImageType::Pointer blurMask = blurMaskGenerator.GetMask();
-  
+  auto blurMask = Blur.Generate(origLabelMask, this->m_brainMask, this->m_skullStripMask);
+
   // Crop necessary masks around blurMask and upsample resolution
   HighResCropFromReferenceMask highResCropFilter;
   highResCropFilter.SetReferenceImage(blurMask);
@@ -28,125 +96,59 @@ RBSAOutputTuple RBSA::GenerateAtrophyTransforms(unsigned int targetLabel)
   highResCropFilter.SetResamplingFactor(m_upsamplingFactor);
   highResCropFilter.FindCropRegion();
 
-  UCharImageType::Pointer blurMaskHighResCrop =
-    highResCropFilter.Apply<UCharImageType>(blurMask);
-  UCharImageType::Pointer origLabelMaskHighResCrop =
-    highResCropFilter.Apply<UCharImageType>(origLabelMask);
-  UCharImageType::Pointer origBrainMaskHighResCrop =
-    highResCropFilter.Apply<UCharImageType>(m_brainMask);
-  UCharImageType::Pointer skullStripMaskHighResCrop =
-    highResCropFilter.Apply<UCharImageType>(m_skullStripMask);
-  UCharImageType::Pointer wmMaskHighResCrop =
-    highResCropFilter.Apply<UCharImageType>(m_wmMask);
+  auto blurMaskHighResCrop = highResCropFilter.Apply<UCharImageType>(blurMask);
+  auto origLabelMaskHighResCrop = highResCropFilter.Apply<UCharImageType>(origLabelMask);
+  auto origBrainMaskHighResCrop = highResCropFilter.Apply<UCharImageType>(m_brainMask);
+  auto skullStripMaskHighResCrop = highResCropFilter.Apply<UCharImageType>(m_skullStripMask);
+  auto wmMaskHighResCrop = highResCropFilter.Apply<UCharImageType>(m_wmMask);
 
   // Create cropped/upsampled masks for atrophied timepoint
-  UCharImageType::Pointer atrophyLabelMaskHighResCrop =
+  auto atrophyLabelMaskHighResCrop =
     LocalizedAtrophy(origLabelMaskHighResCrop, wmMaskHighResCrop, m_nErosionIters);
-  UCharImageType::Pointer atrophyBrainMaskHighResCrop =
-    ReplaceLabelInImage(origBrainMaskHighResCrop,
-                        origLabelMaskHighResCrop,
-                        atrophyLabelMaskHighResCrop);
+
+  auto atrophyBrainMaskHighResCrop =
+    ReplaceLabelInImage(origBrainMaskHighResCrop, origLabelMaskHighResCrop,
+			atrophyLabelMaskHighResCrop);
 
   // Register brain masks (OrigHighResCrop to AtrophyHighResCrop)
-  Warper atrophyWarper;
-  atrophyWarper.SetOriginalLabel(origBrainMaskHighResCrop);
-  atrophyWarper.SetAtrophyLabel(atrophyBrainMaskHighResCrop);
-  atrophyWarper.SetRegistrationMask(origLabelMaskHighResCrop);
-  atrophyWarper.ComputeTransform();
-
-  VectorImageType::Pointer warpHighResCrop = atrophyWarper.GetWarp();
-  VectorImageType::Pointer warpInverseHighResCrop = atrophyWarper.GetInverseWarp();
+  auto warpHighResCrop = RegisterLabelMasks(origBrainMaskHighResCrop, atrophyBrainMaskHighResCrop);
 
   // Apply blur mask to displacement field
-  blurMaskGenerator.BuildInterpolationMetaData(blurMaskHighResCrop, origLabelMaskHighResCrop);
+  auto warpMaskedHighResCrop =
+    Blur.ApplyToWarp(warpHighResCrop, blurMaskHighResCrop, origLabelMaskHighResCrop);
 
-  VectorImageType::Pointer warpMaskedHighResCrop =
-    blurMaskGenerator.ApplyToWarp(warpHighResCrop);
-  VectorImageType::Pointer warpInverseMaskedHighResCrop =
-    blurMaskGenerator.ApplyToWarp(warpInverseHighResCrop);
-
-  // Revert fields back to original dimension/resolution
-  VectorImageType::Pointer warpMasked =
-    highResCropFilter.Revert<VectorImageType>(warpMaskedHighResCrop);
-  VectorImageType::Pointer warpInverseMasked =
-    highResCropFilter.Revert<VectorImageType>(warpInverseMaskedHighResCrop);
-
-  // Return
-  return {blurMask, warpMasked, warpInverseMasked};
+  // Paste into composite output data
+  AddImagesInPlace<IntImageType, UCharImageType>(this->m_countImage, blurMask);
+  
+  auto warpMasked = highResCropFilter.Revert<VectorImageType>(warpMaskedHighResCrop);
+  AddImagesInPlace<VectorImageType>(this->m_warp, warpMasked);
 }
 
 
-
-RBSAOutputTuple CombineLabelOutputs(std::vector<RBSAOutputTuple> labelData)
+void RBSA::GenerateAtrophyTransforms()
 {
-  VectorImageType::PixelType zeroVec = itk::NumericTraits<VectorImageType::PixelType>::ZeroValue();
-
-  const size_t& nOutputs = labelData.size();
-  if(labelData.size() == 1) return labelData.at(0);
-    
-  // Initialize composite images
-  UCharImageType::Pointer ref = std::get<0>(labelData.at(0));
-  UCharImageType::Pointer outMask = InitializeZeroFilledImage<UCharImageType, UCharImageType>(ref);
-  VectorImageType::Pointer outWarp = InitializeZeroFilledImage<UCharImageType, VectorImageType>(ref);
-  VectorImageType::Pointer outInverseWarp = DuplicateImage<VectorImageType>(outWarp);
-
-  // Combine inputs
-  std::vector<VectorImageType::PixelType> disps, inverseDisps;
-  ImageRegionIteratorWithIndexType<VectorImageType> iterator
-    (outWarp, outWarp->GetLargestPossibleRegion());
-  iterator.GoToBegin();
-
-  VectorImageType::PixelType pixel;
-  
-  while(!iterator.IsAtEnd()) {
-    const VectorImageType::IndexType& index = iterator.GetIndex();
-    bool isWarpPixel = false;
-    
-    // Get values from input warp if mask is nonzero
-    for(const auto& data : labelData) {
-      UCharImageType::Pointer mask = std::get<0>(data);
-      VectorImageType::Pointer warp = std::get<1>(data);
-      VectorImageType::Pointer inverseWarp = std::get<2>(data);
-
-      if(mask->GetPixel(index) == 1) {
-	isWarpPixel = true;
-        disps.emplace_back(warp->GetPixel(index));
-        inverseDisps.emplace_back(inverseWarp->GetPixel(index));
-      }
-    }
-            
-    // Calculate output image values
-    if(isWarpPixel) {
-      outMask->SetPixel(index, 1);
-
-      // Warp
-      pixel.Fill(0);
-      for(const auto& disp : disps) {
-        for(unsigned int d = 0; d < nDims; d++) {
-          pixel[d] += disp[d];
-        }
-      }
-      pixel /= static_cast<double>(disps.size());
-      outWarp->SetPixel(index, pixel);
-
-      // Inverse warp
-      pixel.Fill(0);
-
-      for(const auto& disp : inverseDisps) {
-        for(unsigned int d = 0; d < nDims; d++) {
-          pixel[d] += disp[d];
-        }
-      }
-      pixel /= static_cast<double>(inverseDisps.size());
-      outInverseWarp->SetPixel(index, pixel);
-    }
-
-    // Reset
-    disps.clear();
-    inverseDisps.clear();
-    ++iterator;
+  // Generate label-specific transforms
+  for(const auto& label : this->m_targetLabels) {
+    std::cout << "Generating atrophy transform for label " << label << std::endl;
+    this->GenerateTransformForLabel(label);
   }
 
-  // Output
-  return {outMask, outWarp, outInverseWarp};
+  // Normalize output warps by this->m_countImage
+  auto region = this->m_countImage->GetLargestPossibleRegion();
+  auto countIt = ImageRegionIteratorWithIndexType<IntImageType>(this->m_countImage, region);
+  auto warpIt = ImageRegionIteratorWithIndexType<VectorImageType>(this->m_warp, region);
+
+  for(countIt.GoToBegin(), warpIt.GoToBegin(); !countIt.IsAtEnd(); ++countIt, ++warpIt)
+    {
+      const TPixel<IntImageType>& n = countIt.Get();
+      if(n > 0) {
+        const TPixel<VectorImageType>& warpPixel = warpIt.Get() / static_cast<float>(n);
+        warpIt.Set(warpPixel);
+      }
+    }
+
+  this->m_mask = BinaryThresholdImage<IntImageType>(this->m_countImage);
+  this->m_mask->DisconnectPipeline();
+  this->m_warp->DisconnectPipeline();
 }
+

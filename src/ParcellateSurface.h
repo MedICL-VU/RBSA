@@ -6,31 +6,32 @@
 //-------------------------------------------------------------------------------------------------
 
 template <typename TImage>
-typename TImage::Pointer MakeTargetLabelParcellation
-(typename TImage::Pointer input, std::vector<typename TImage::PixelType>& targetLabels,
- typename TImage::PixelType defaultPixelValue = 1);
+TPointer<TImage> MakeTargetLabelParcellation(TPointer<TImage> input,
+					 std::vector<TPixel<TImage>>& vLabels,
+					 TPixel<TImage> defaultPixelValue = 1);
 
 template <typename TImage>
-typename TImage::PixelType MajorityVote
-(const std::vector<typename TImage::PixelType>& votes,
- const std::vector<typename TImage::PixelType>& validLabels);
+TPixel<TImage> MajorityVote(const std::vector<TPixel<TImage>>& votes,
+			  const std::vector<TPixel<TImage>>& vLabels);
 
 template <typename TImage, typename TArray>
-vtkSmartPointer<TArray> AssignLabels
-(vtkSmartPointer<vtkPolyData> surface, typename TImage::Pointer image,
- const std::string& labelArrayName, const std::vector<typename TImage::PixelType>& validLabels,
- bool convertFromRAS);
+vtkSmartPointer<TArray>AssignLabels(vtkSmartPointer<vtkPolyData> surface,
+				    TPointer<TImage> image,
+				    const std::string& labelArrayName,
+				    const std::vector<TPixel<TImage>>& vLabels,
+				    bool convertFromRAS);
 
 template <typename TImage, typename TArray>
-unsigned int FillHoles
-(vtkSmartPointer<vtkPolyData> surface, vtkSmartPointer<TArray> labels,
- const std::vector<typename TImage::PixelType>& validLabels, bool convertFromRAS);
+unsigned int FillHoles(vtkSmartPointer<vtkPolyData> surface,
+		       vtkSmartPointer<TArray> labels,
+		       const std::vector<TPixel<TImage>>& vLabels,
+		       bool convertFromRAS);
 
 template <typename TImage>
-void ParcellateSurface
-(vtkSmartPointer<vtkPolyData> surface, typename TImage::Pointer image,
- const std::string& labelArrayName, const std::vector<typename TImage::PixelType>& validLabels,
- bool convertFromRAS = false);
-
+void ParcellateSurface(vtkSmartPointer<vtkPolyData> surface,
+		       TPointer<TImage> image,
+		       const std::string& labelArrayName,
+		       const std::vector<TPixel<TImage>>& vLabels,
+		       bool convertFromRAS = false);
 
 #endif

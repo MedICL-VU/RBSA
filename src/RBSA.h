@@ -9,42 +9,50 @@
 #include "Warp.h"
 #include "utils.h"
 
-using RBSAOutputTuple = std::tuple<UCharImageType::Pointer,
-				   VectorImageType::Pointer,
-				   VectorImageType::Pointer>;
+#include "itkBinaryFillholeImageFilter.h"
 
 class RBSA {
  public:
   RBSA();
 
   // Input images
-  void SetInputParcellation(IntImageType::Pointer parc) { this->m_parcellation = parc; }
-  void SetBrainMask(UCharImageType::Pointer mask) { this->m_brainMask = mask; }
-  void SetSkullStripMask(UCharImageType::Pointer mask) { this->m_skullStripMask = mask; }
-  void SetWMMask(UCharImageType::Pointer mask) { this->m_wmMask = mask; }
+  void SetInputParcellation(TPointer<IntImageType> parc);
+  void SetSkullStripMask(TPointer<UCharImageType> mask);
+
+  // Labels
+  void SetTargetLabels(const std::vector<int>& inputLabels);
+  void SetWMLabels(const std::vector<int>& inputLabels);
 
   // Parameters
   void SetNumberOfErosionIterations(unsigned int nIters) { this->m_nErosionIters = nIters; }
   void SetUpsamplingFactor(float factor) { this->m_upsamplingFactor = factor; }
-  
-  // Main method
-  RBSAOutputTuple GenerateAtrophyTransforms(unsigned int label);
+    
+  // Methods
+  void GenerateTransformForLabel(unsigned int label);
+  void GenerateAtrophyTransforms();
 
+  // Outputs
+  TPointer<UCharImageType> GetWarpMask() const { return this->m_mask; }
+  TPointer<VectorImageType> GetWarp() const { return this->m_warp; }
   
  private:
-  IntImageType::Pointer m_parcellation;
-  UCharImageType::Pointer m_brainMask;
-  UCharImageType::Pointer m_skullStripMask;
-  UCharImageType::Pointer m_wmMask;
+  // Inputs
+  TPointer<IntImageType> m_parc;
+  TPointer<UCharImageType> m_brainMask;
+  TPointer<UCharImageType> m_skullStripMask;
+  TPointer<UCharImageType> m_wmMask;
+
+  // Parameters
+  std::vector<int> m_targetLabels;
   unsigned int m_nErosionIters;
   float m_upsamplingFactor;
 
-  VectorImageType::Pointer m_warp;
-  VectorImageType::Pointer m_inverseWarp;
+  // Composite output images
+  TPointer<IntImageType> m_countImage;
+  TPointer<UCharImageType> m_mask;
+  TPointer<VectorImageType> m_warp;
 };
 
-
-RBSAOutputTuple CombineLabelOutputs(std::vector<RBSAOutTuple> labelData);
-
+using BinaryFillHolesFilterType = itk::BinaryFillholeImageFilter<UCharImageType>;
 
 #endif

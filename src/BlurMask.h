@@ -12,112 +12,76 @@
 #include "utils.h"
 
 
-// Custom type defs
-struct IndexHasher {
-  std::size_t operator()(const itk::Index<nDims>& idx) const {
-    std::size_t h1 = std::hash<long>()(idx[0]);
-    std::size_t h2 = std::hash<long>()(idx[1]);
-    std::size_t h3 = std::hash<long>()(idx[2]);
+const unsigned int nInterpolationPoints = 4;
 
-    return h1 ^ (h2 << 1) ^ (h3 << 2);
-  }
+
+// Custom typedefs
+struct PixelToLineData {
+  unsigned int lineId; // line id
+  float dist2;         // squared distance to point
+  float t;             // vtk param
 };
 
-struct IndexEqual {
-  bool operator()(const itk::Index<nDims>& a, const itk::Index<nDims>& b) const {
-    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
+template <unsigned int N_max>
+struct ClosestNLines {
+  std::array<PixelToLineData, N_max> a{};
+  unsigned int N = 0;
+
+  void consider(unsigned int lineId, float dist2, float t) {
+    if(N < N_max) {
+      // Haven't seen N lines yet, so just add to array and continue
+      a[N++] = {lineId, dist2, t};
+    }
+    else {
+      // Array is full -> check if input dist2 is small and swap with largest
+      auto maxIt = std::max_element(a.begin(), a.end(),
+				    [](auto& x, auto&y) { return x.dist2 < y.dist2; });
+      if(dist2 < maxIt->dist2) *maxIt = {lineId, dist2, t};
+    }
   }
 };
-
-using LineMetaData = std::tuple<unsigned int, double, double>;
-using InterpolationMetadata =
-  std::unordered_map<itk::Index<nDims>, std::vector<LineMetaData>, IndexHasher, IndexEqual>;
 
 
 // Main class
 class BlurMaskGenerator {
  public:
   BlurMaskGenerator();
-
-  // Inputs
-  void SetLabelMask(UCharImageType::Pointer mask) { this->m_labelMask = mask; }
-  void SetBrainMask(UCharImageType::Pointer mask) { this->m_brainMask = mask; }
-  void SetSkullStripMask(UCharImageType::Pointer mask) { this->m_skullStripMask = mask; }
-  void SetStepSize(float stepSize) { this->m_stepSize = stepSize; }
-
+  
   // Methods
-  void Generate();
-  void BuildInterpolationMetaData(UCharImageType::Pointer referenceBlurMask,
-				  UCharImageType::Pointer referenceLabelMask);
-  VectorImageType::Pointer ApplyToWarp(VectorImageType::Pointer warp);
+  void SetStepSize(float stepSize) { this->m_stepSize = stepSize; }
+  TPointer<UCharImageType> Generate(TPointer<UCharImageType> labelMask,
+				   TPointer<UCharImageType> brainMask,
+				   TPointer<UCharImageType> skullStripMask);
+  TPointer<VectorImageType> ApplyToWarp(TPointer<VectorImageType> warp,
+				       TPointer<UCharImageType> blurMask,
+				       TPointer<UCharImageType> labelMask);
     
-  // Outputs
-  UCharImageType::Pointer GetMask() const { return this->m_outputMask; }
-  vtkSmartPointer<vtkPolyData> GetLabelMesh() const { return this->m_labelMesh; }
-  vtkSmartPointer<vtkPoints> GetPoints() const { return this->m_pointCloud; }
-  std::vector<vtkSmartPointer<vtkIdList>> GetPointIds() const {
-    return this->m_pointCloudLinePointIds; }
-  
  private:
-  // Blur mask generation images
-  UCharImageType::Pointer m_labelMask;
-  UCharImageType::Pointer m_brainMask;
-  UCharImageType::Pointer m_skullStripMask;
-  UCharImageType::Pointer m_blurMask;
-  UCharImageType::Pointer m_outputMask;
-
-  // Blur mask interpolation data (images probably have different sizes/resolutions)
-  UCharImageType::Pointer m_blurMaskToApply;
-  UCharImageType::Pointer m_labelMaskToApply;
-  InterpolationMetadata m_interpolationMetaData;
-
-  // Blur mask point cloud data
-  vtkSmartPointer<vtkPolyData> m_labelMesh;
-  vtkSmartPointer<vtkPoints> m_pointCloud;
-  vtkSmartPointer<vtkPolyData> m_pointCloudLineMidpoints;
-  
-  std::vector<vtkSmartPointer<vtkIdList>> m_pointCloudLinePointIds;
-  vtkSmartPointer<vtkUnsignedIntArray> m_pointCloudPointLineIds;
-  vtkSmartPointer<vtkFloatArray> m_pointCloudLineInterpolationWeights;
-
-  vtkSmartPointer<vtkCellArray> m_pointCloudLines;
-
+  // Parameters
   float m_stepSize = 0.5;
   unsigned int m_nInterpolationPoints = 4;
-};
 
+  // Blur mask point cloud data
+  vtkSmartPointer<vtkPoints> m_pointCloud;
+  vtkSmartPointer<vtkCellArray> m_pointCloudLines;
+};
   
   
 // ITK typedefs
 using BinaryContourImageFilterType = itk::BinaryContourImageFilter<UCharImageType, UCharImageType>;
-UCharImageType::Pointer BinaryContourImage(UCharImageType::Pointer image);
-
-using BinaryFillholeImageFilterType = itk::BinaryFillholeImageFilter<UCharImageType>;
-UCharImageType::Pointer BinaryFillHoles(UCharImageType::Pointer image);
 
 using GradientImageFilterType =
   itk::GradientRecursiveGaussianImageFilter<FloatImageType, VectorImageType>;
 
-using GVFImageFilterType =
-  itk::GradientVectorFlowImageFilter<VectorImageType, VectorImageType, float>;
-
-using MinimumMaximumImageCalculatorType = itk::MinimumMaximumImageCalculator<FloatImageType>;
-float GetMaximumImageValue(FloatImageType::Pointer image);
-
 using SignedMaurerDistanceMapImageFilterType =
-    itk::SignedMaurerDistanceMapImageFilter<UCharImageType, FloatImageType>;
-FloatImageType::Pointer SignedDistanceTransform(IntImageType::Pointer image);
+  itk::SignedMaurerDistanceMapImageFilter<UCharImageType, FloatImageType>;
 
 using RescaleImageFilterType =
   itk::VectorRescaleIntensityImageFilter<VectorImageType, VectorImageType>;
 
 
 // Functions
-vtkSmartPointer<vtkPolyData> CreateLabelMesh
-(UCharImageType::Pointer labelMask, FloatImageType::Pointer distanceMap);
-
-unsigned int GetClosestPointFromIdList
-(double p0[nDims], vtkSmartPointer<vtkPoints> points, vtkSmartPointer<vtkIdList> pointIdList,
- double (&closestPointDist2));
+vtkSmartPointer<vtkPolyData> CreateLabelMesh(TPointer<UCharImageType> labelMask,
+					     TPointer<FloatImageType> distanceMap);
 
 #endif

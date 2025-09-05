@@ -8,8 +8,8 @@
 #include <string>
 #include <limits>
 #include <chrono>
-#include <unordered_set>
 #include <numeric>
+#include <type_traits>
 
 #include "CLI11.hpp"
 
@@ -35,6 +35,7 @@
 #include <itkSubtractImageFilter.h>
 #include <itkResampleImageFilter.h>
 #include <itkStatisticsImageFilter.h>
+#include <itkVectorMagnitudeImageFilter.h>
 
 #include <itkCommand.h>
 
@@ -76,26 +77,39 @@
 #include <vtkCleanPolyData.h>
 
 
+const float eps = 1e-5;
 const int nDims = 3;
-
+const int intInf = std::numeric_limits<int>::max();
 const std::vector<double> rasShift = {-1.0, -1.0, 1.0};
 
+
 // ITK image types
-using IndexType = itk::Index<nDims>;
+template <typename TImage>
+using TPointer = typename TImage::Pointer;
+
+template <typename TImage>
+using TPixel = typename TImage::PixelType;
+
+template <typename TImage>
+using TIndex = typename TImage::IndexType;
+
+template <typename TImage>
+using TRegion = typename TImage::RegionType;
+
 using ContinuousIndexType = itk::ContinuousIndex<double, nDims>;
-using FloatImageType = itk::Image<float, nDims>;
+
 using VectorImageType = itk::Image<itk::Vector<float, nDims>, nDims>;
 using IntImageType = itk::Image<int, nDims>;
 using UCharImageType = itk::Image<unsigned char, nDims>;
 
-using RBSAOutTuple = std::tuple<UCharImageType::Pointer,
-                                VectorImageType::Pointer,
-                                VectorImageType::Pointer>;
+const itk::Vector<float, nDims> vZero = itk::NumericTraits<float>::ZeroValue();
+using FloatImageType = itk::Image<float, nDims>;
+
 
 // Basic
 template <typename TImage>
 bool IsInside
-(const typename TImage::PixelType& label, const std::vector<typename TImage::PixelType>& valid);
+(const TPixel<TImage>& label, const std::vector<TPixel<TImage>>& valid);
   
 
 // IO
@@ -110,77 +124,154 @@ bool CheckFileExtension(std::string filename, std::vector<std::string> exts);
 template <typename TImage>
 using ImageReaderType = itk::ImageFileReader<TImage>;
 template <typename TImage>
-typename TImage::Pointer ReadImage(const std::string& filename);
+TPointer<TImage> ReadImage(const std::string& filename);
 
 template <typename TImage>
 using ImageWriterType = itk::ImageFileWriter<TImage>;
 template <typename TImage>
-void WriteImage(typename TImage::Pointer image, const std::string& filename);
+void WriteImage(TPointer<TImage> image, const std::string& filename);
 
 vtkSmartPointer<vtkPolyData> ReadPolyData(const std::string& filename);
 
 void WritePolyData(vtkSmartPointer<vtkPolyData> polyData, const std::string& filename);
 
 
-// Misc. image filters
-template <typename TImage>
-using AddImageFilterType = itk::AddImageFilter<TImage>;
-template <typename TImage>
-typename TImage::Pointer AddImages
-(typename TImage::Pointer image1, typename TImage::Pointer image2);
+/* 
+   Misc. image filters
+*/
+// Add images
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+using AddImageFilterType = itk::AddImageFilter<TInImage1, TInImage2, TOutImage>;
 
-using BinaryFillHolesFilterType = itk::BinaryFillholeImageFilter<UCharImageType>;
-UCharImageType::Pointer BinaryFillHoles
-(UCharImageType::Pointer image, UCharImageType::PixelType value);
+template <typename TImage>
+TPointer<TImage> AddImages(TPointer<TImage> image1, TPointer<TImage> image2);
 
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+TPointer<TOutImage> AddImages(TPointer<TInImage1> image1, TPointer<TInImage2> image2);
+
+template <typename TImage1, typename TImage2>
+void AddImagesInPlace(TPointer<TImage1>& image1, TPointer<TImage2> image2);
+
+template <typename TImage>
+void AddImagesInPlace(TPointer<TImage>& image1, TPointer<TImage> image2);
+
+
+// Binary threshold image
 template<typename TInImage>
 using BinaryThresholdImageFilterType = itk::BinaryThresholdImageFilter<TInImage, UCharImageType>;
-template <typename TInImage>
-typename UCharImageType::Pointer BinaryThresholdImage
-(typename TInImage::Pointer image, const typename TInImage::PixelType& lower,
- const typename TInImage::PixelType& upper,
- const typename UCharImageType::PixelType& outsideValue = 0,
- const typename UCharImageType::PixelType& insideValue = 1);
 
+using VectorMagnitudeImageFilterType =
+  itk::VectorMagnitudeImageFilter<VectorImageType, FloatImageType>;
+
+template <typename TInImage>
+TPointer<UCharImageType> BinaryThresholdImage(TPointer<TInImage> image,
+					      const TPixel<TInImage>& lower,
+					      const TPixel<TInImage>& upper,
+					      const TPixel<UCharImageType>& outsideValue,
+					      const TPixel<UCharImageType>& insideValue);
+
+template <typename TInImage>
+TPointer<UCharImageType> BinaryThresholdImage(TPointer<TInImage> image,
+                                              const TPixel<TInImage>& lower,
+                                              const TPixel<TInImage>& upper);
+
+template <typename TInImage>
+TPointer<UCharImageType> BinaryThresholdImage(TPointer<TInImage> image);
+
+TPointer<UCharImageType> BinaryThresholdVectorImage(TPointer<VectorImageType> image);
+
+
+// Binary threshold image (in-place)
+void BinaryThresholdImageInPlace(TPointer<UCharImageType>& image,
+				 const TPixel<UCharImageType>& lower,
+				 const TPixel<UCharImageType>& upper,
+				 const TPixel<UCharImageType>& outsideValue,
+				 const TPixel<UCharImageType>& insideValue);
+
+void BinaryThresholdImageInPlace(TPointer<UCharImageType>& image,
+				 const TPixel<UCharImageType>& lower,
+				 const TPixel<UCharImageType>& upper);
+
+void BinaryThresholdImageInPlace(TPointer<UCharImageType>& image);
+
+
+// Cast image
 template <typename TInImage, typename TOutImage>
 using CastImageFilterType = itk::CastImageFilter<TInImage, TOutImage>;
-template <typename TInImage, typename TOutImage>
-typename TOutImage::Pointer CastImage(typename TInImage::Pointer image);
 
+template <typename TInImage, typename TOutImage>
+TPointer<TOutImage> CastImage(TPointer<TInImage> image);
+
+
+// Duplicate image
 template <typename TImage>
 using DuplicateImageFilterType = itk::ImageDuplicator<TImage>;
-template <typename TImage>
-typename TImage::Pointer DuplicateImage(typename TImage::Pointer image);
 
+template <typename TImage>
+TPointer<TImage> DuplicateImage(TPointer<TImage> image);
+
+
+// Initialize new image
 template <typename TInImage, typename TOutImage>
-typename TOutImage::Pointer InitializeZeroFilledImage(typename TInImage::Pointer ref);
+TPointer<TOutImage> InitializeZeroFilledImage(TPointer<TInImage> ref);
 
+
+// Check if label is in image
 template <typename TImage>
-bool IsLabelInImage(typename TImage::Pointer image, const typename TImage::PixelType label);
+bool IsLabelInImage(TPointer<TImage> image, const TPixel<TImage> label);
 
+
+// Mask imag
 template <typename TImage>
 using MaskImageFilterType = itk::MaskImageFilter<TImage, UCharImageType, TImage>;
-template <typename TImage>
-typename TImage::Pointer MaskImage(typename TImage::Pointer image, UCharImageType::Pointer mask);
 
 template <typename TImage>
-using MultiplyImageFilterType = itk::MultiplyImageFilter<TImage, TImage, TImage>;
-template <typename TImage>
-typename TImage::Pointer MultiplyImages
-(typename TImage::Pointer image1, typename TImage::Pointer image2);
+TPointer<TImage> MaskImage(TPointer<TImage> image, TPointer<UCharImageType> mask);
 
+
+// Multiple images
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+using MultiplyImageFilterType = itk::MultiplyImageFilter<TInImage1, TInImage2, TOutImage>;
+
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+TPointer<TOutImage> MultiplyImages(TPointer<TInImage1> image1, TPointer<TInImage2> image2);
+
+template <typename TImage>
+TPointer<TImage> MultiplyImages(TPointer<TImage> image1, TPointer<TImage> image2);
+
+template <typename TImage1, typename TImage2>
+void MultiplyImagesInPlace(TPointer<TImage1>& image1, TPointer<TImage2> image2);
+
+template <typename TImage>
+void MultiplyImagesInPlace(TPointer<TImage>& image1, TPointer<TImage> image2);
+
+
+// Get sum of voxels in image
 template <typename TImage>
 using StatisticsImageFilterType = itk::StatisticsImageFilter<TImage>;
-template <typename TImage>
-typename TImage::PixelType ImageSum(typename TImage::Pointer image);
 
 template <typename TImage>
-using SubtractImageFilterType = itk::SubtractImageFilter<TImage, TImage, TImage>;
+float ImageSum(TPointer<TImage> image);
+
+
+// Subtract images
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+using SubtractImageFilterType = itk::SubtractImageFilter<TInImage1, TInImage2, TOutImage>;
+
+template <typename TInImage1, typename TInImage2, typename TOutImage>
+TPointer<TOutImage> SubtractImages(TPointer<TInImage1> image1, TPointer<TInImage2> image2);
+
 template <typename TImage>
-typename TImage::Pointer SubtractImages
-(typename TImage::Pointer image1, typename TImage::Pointer image2);
+TPointer<TImage> SubtractImages(TPointer<TImage> image1, TPointer<TImage> image2);
+
+template <typename TImage1, typename TImage2>
+void SubtractImagesInPlace(TPointer<TImage1>& image1, TPointer<TImage2> image2);
+
+template <typename TImage>
+void SubtractImagesInPlace(TPointer<TImage>& image1, TPointer<TImage> image2);
 
 
+// Image iterators
 template <typename TImage>
 using ImageRegionIteratorWithIndexType = itk::ImageRegionIteratorWithIndex<TImage>;
 
@@ -188,6 +279,7 @@ template <typename TImage>
 using ImageRegionConstIteratorType = itk::ImageRegionConstIterator<TImage>;
 
 
+// Image interpolators
 template<typename TImage>
 using LinearInterpolateType = itk::LinearInterpolateImageFunction<TImage, double>;
 
@@ -195,26 +287,30 @@ template<typename TImage>
 using NearestNeighborInterpolateType = itk::NearestNeighborInterpolateImageFunction<TImage, double>;
 
 
+// Image index to double (and vice versa)
 template <typename TImage>
-itk::ContinuousIndex<double, nDims> TransformNDimsDoubleToContinuousIndex
-(typename TImage::Pointer image, double p0[nDims], bool convertFromRAS = false);
+ContinuousIndexType TransformNDimsDoubleToContinuousIndex(TPointer<TImage> image,
+							  double p0[nDims],
+							  bool isRAS = false);
 
 template <typename TImage>
-typename TImage::IndexType TransformNDimsDoubleToIndex
-(typename TImage::Pointer image, double p0[nDims], bool convertFromRAS = false);
+TIndex<TImage> TransformNDimsDoubleToIndex(TPointer<TImage> image,
+					   double p0[nDims],
+					   bool isRAS = false);
 
 template <typename TImage>
-void TransformIndexToNDimsDouble
-(typename TImage::Pointer image, typename TImage::IndexType index, double (&p0)[nDims]);
+void TransformIndexToNDimsDouble(TPointer<TImage> image,
+				 TIndex<TImage> index,
+				 double (&p0)[nDims]);
 
 
 // VTK stuff
-void GeneratePolyDataNormals
-(vtkSmartPointer<vtkPolyData> polydata, bool overwrite = false, bool reverse = false);
+void GeneratePolyDataNormals(vtkSmartPointer<vtkPolyData> polydata,
+			     bool overwrite = false,
+			     bool reverse = false);
 
 template <typename TImage>
-void TransformVTKPolyDataToITKImageSpace
-(vtkSmartPointer<vtkPolyData> mesh, typename TImage::Pointer image);
+void TransformVTKPolyDataToITKImageSpace(vtkSmartPointer<vtkPolyData> mesh, TPointer<TImage> image);
 
 template <typename TImage> struct VTKArrayFromITKImage;
 template<> struct VTKArrayFromITKImage<IntImageType> { using type = vtkIntArray; };
@@ -222,19 +318,20 @@ template<> struct VTKArrayFromITKImage<UCharImageType> { using type = vtkUnsigne
 template<> struct VTKArrayFromITKImage<FloatImageType> { using type = vtkFloatArray; };
 
 
-void BinaryITKImageToVTKMesh
-(UCharImageType::Pointer itkTargetImage, vtkSmartPointer<vtkPolyData> outputMesh);
+void BinaryITKImageToVTKMesh(TPointer<UCharImageType> itkTargetImage,
+			     vtkSmartPointer<vtkPolyData> outputMesh);
 
 
 // Other misc
-void PrintDuration
-  (std::chrono::steady_clock::time_point t0, std::string text, std::string time_type = "seconds");
+void PrintDuration(std::chrono::steady_clock::time_point t0,
+		   std::string text,
+		   std::string time_type = "seconds");
 
 void PrintNDimsDouble(double point[nDims]);
 
-void VisualizePointSet
-(vtkSmartPointer<vtkPoints> points, const std::string& filename,
- std::vector<vtkSmartPointer<vtkFloatArray>> pointDataFloatArrays = {});
+void VisualizePointSet(vtkSmartPointer<vtkPoints> points,
+		       const std::string& filename,
+		       std::vector<vtkSmartPointer<vtkFloatArray>> pointDataFloatArrays = {});
 
 
 #endif

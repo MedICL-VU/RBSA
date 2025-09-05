@@ -1,21 +1,19 @@
 #include "Warp.h"
 
-Warper::Warper(){}
+//--------------------------------------------------------------------------------------------------
 
-void Warper::ComputeTransform()
+TPointer<VectorImageType> RegisterLabelMasks(TPointer<UCharImageType> movingInput,
+					    TPointer<UCharImageType> fixedInput)
 {
   // Initialize
   auto registration = RegistrationMethodType::New();
-  
+
   // Set input data
-  FloatImageType::Pointer fixedImage =
-    CastImage<UCharImageType, FloatImageType>(this->m_inputFixedImage);
-  FloatImageType::Pointer movingImage =
-    CastImage<UCharImageType, FloatImageType>(this->m_inputMovingImage);
-  
+  TPointer<FloatImageType> fixedImage = CastImage<UCharImageType, FloatImageType>(fixedInput);
+  TPointer<FloatImageType> movingImage = CastImage<UCharImageType, FloatImageType>(movingInput);
   registration->SetFixedImage(fixedImage);
   registration->SetMovingImage(movingImage);
-  
+
   // Set initial transform
   auto initialField = VectorImageType::New();
   initialField->SetRegions(fixedImage->GetLargestPossibleRegion());
@@ -23,23 +21,23 @@ void Warper::ComputeTransform()
   initialField->SetSpacing(fixedImage->GetSpacing());
   initialField->SetDirection(fixedImage->GetDirection());
   initialField->Allocate();
-  initialField->FillBuffer(VectorImageType::PixelType(0.0));
+  initialField->FillBuffer(TPixel<VectorImageType>(0.0));
 
   auto transform = DisplacementFieldTransformType::New();
   transform->SetDisplacementField(initialField);
 
   registration->SetInitialTransform(transform);
-  
+
   // Set metric
   auto registrationMask = MaskObjectType::New();
-  registrationMask->SetImage(this->m_inputMovingImage);
+  registrationMask->SetImage(movingInput);
 
   auto metric = MSQMetricType::New();
   metric->SetFixedImageMask(registrationMask);
   metric->SetMovingImageMask(registrationMask);
 
   registration->SetMetric(metric);
-  
+
   // Configure optimizer w/ multi-level resolution
   auto optimizer = GradientDescentOptimizerType::New();
   optimizer->SetNumberOfIterations(100);
@@ -57,7 +55,8 @@ void Warper::ComputeTransform()
   itk::Array<int> shrinkFactors, smoothingSigmas;
   shrinkFactors.SetSize(nLevels);
   smoothingSigmas.SetSize(nLevels);
-
+  
+  
   for(unsigned int n = 0; n < nLevels; n++) {
     smoothingSigmas[n] = nLevels - (n + 1);
     shrinkFactors[n] = std::pow(2, smoothingSigmas[n]);
@@ -65,7 +64,7 @@ void Warper::ComputeTransform()
   registration->SetShrinkFactorsPerLevel(shrinkFactors);
   registration->SetSmoothingSigmasPerLevel(smoothingSigmas);
 
-    
+
   // Configure for multi-level resolution
   itk::Array<int> startingShrinkFactors;
   startingShrinkFactors.SetSize(nDims);
@@ -79,7 +78,7 @@ void Warper::ComputeTransform()
   pyramid->SetNumberOfLevels(nLevels);
   pyramid->SetStartingShrinkFactors(shrinkFactors[0]);
   pyramid->Update();
-  
+
   RegistrationMethodType::TransformParametersAdaptorsContainerType adaptorsContainer;
   for(unsigned int n = 0; n < nLevels; n++) {
     auto levelImage = pyramid->GetOutput(n);
@@ -89,34 +88,26 @@ void Warper::ComputeTransform()
     adaptor->SetRequiredSize(levelImage->GetLargestPossibleRegion().GetSize());
     adaptor->SetRequiredDirection(levelImage->GetDirection());
     adaptor->SetRequiredOrigin(levelImage->GetOrigin());
-    
+
     adaptorsContainer.push_back(static_cast<BaseAdaptorPointer>(adaptor));
   }
   registration->SetTransformParametersAdaptorsPerLevel(adaptorsContainer);
 
   // Run
   registration->Update();
-  
-  // Get forward warp
+
+  // Get warp
   auto warpTransform =
     dynamic_cast<DisplacementFieldTransformType*>(registration->GetModifiableTransform());
-  this->m_warp = warpTransform->GetDisplacementField();
 
-  // Get inverse warp
-  auto invertFieldFilter = InvertDisplacementFieldFilterType::New();
-  invertFieldFilter->SetInput(this->m_warp);
-  invertFieldFilter->SetMaximumNumberOfIterations(50);
-  invertFieldFilter->SetMeanErrorToleranceThreshold(1e-6);
-  invertFieldFilter->Update();
-  this->m_inverseWarp = invertFieldFilter->GetOutput();
-
+  TPointer<VectorImageType> warp = warpTransform->GetDisplacementField();
+  warp->DisconnectPipeline();
+  return warp;
 }
 
 
-// ------------------ Functions to apply the warps ------------------
-
-FloatImageType::Pointer WarpImage
-(FloatImageType::Pointer image, VectorImageType::Pointer warp)
+TPointer<FloatImageType> WarpImage(TPointer<FloatImageType> image,
+				  TPointer<VectorImageType> warp)
 {
   auto interpolator = LinearInterpolateType<FloatImageType>::New();
   interpolator->SetInputImage(image);
@@ -135,40 +126,74 @@ FloatImageType::Pointer WarpImage
 }
 
 
-vtkSmartPointer<vtkPolyData> WarpSurface
-(vtkSmartPointer<vtkPolyData> inputSurface, VectorImageType::Pointer warp,
- UCharImageType::Pointer mask, bool convertFromRAS, bool checkMask)
+inline bool isInsideMask(std::set<unsigned int> pointNeighborIds,
+			 vtkSmartPointer<vtkPolyData> surface,
+			 TPointer<UCharImageType> mask,
+			 bool isRAS)
 {
+  for(const auto& q : pointNeighborIds) {
+    double q0[nDims];
+    surface->GetPoint(q, q0);
+    
+    const TIndex<UCharImageType>& idx = TransformNDimsDoubleToIndex<UCharImageType>(mask, q0, isRAS);
+    if(!mask->GetLargestPossibleRegion().IsInside(idx)) {
+      std::cerr << "[Warp::IsInsideMask()]: huh, index (" << idx << ") is not inside :(\n";
+    }
+    if(mask->GetPixel(idx) != 1) return true;
+  }
+  return false;
+}
+
+
+vtkSmartPointer<vtkPolyData> WarpSurface(vtkSmartPointer<vtkPolyData> inputSurface,
+					 TPointer<VectorImageType> warp,
+					 TPointer<UCharImageType> mask,
+					 bool isRAS,
+					 bool checkMask)
+{
+  // Initialize
   auto surface = vtkSmartPointer<vtkPolyData>::New();
   surface->DeepCopy(inputSurface);
 
   const unsigned int& nPoints = surface->GetNumberOfPoints();
-
+  
   // Deform the surface
   auto interpolator = LinearInterpolateType<VectorImageType>::New();
   interpolator->SetInputImage(warp);
+
+  vtkNew<vtkIdList> cellPointIds, pointCellIds;
+  std::set<unsigned int> pointNeighborIds;
   
   for(unsigned int p = 0; p < nPoints; p++) {
     double p0[nDims];
     surface->GetPoint(p, p0);
-    
-    // Check if point is inside the mask
+
+    // Check if point (or any neighbors) are inside the mask
     if(checkMask) {
-      const IndexType& index = TransformNDimsDoubleToIndex<UCharImageType>(mask, p0, convertFromRAS);
-      if(!mask->GetLargestPossibleRegion().IsInside(index)) {
-	std::cerr << "[WarpSurfaces():] huh, index (" << index << ") is not inside :(\n";
+      if(pointNeighborIds.size() > 0) pointNeighborIds.clear();
+      pointCellIds->Reset();
+      surface->GetPointCells(p, pointCellIds);
+
+      for(unsigned int i = 0; i < pointCellIds->GetNumberOfIds(); i++) {
+	cellPointIds->Reset();
+	surface->GetCellPoints(pointCellIds->GetId(i), cellPointIds);
+
+	for(unsigned int j = 0; j < cellPointIds->GetNumberOfIds(); j++) {
+	  pointNeighborIds.emplace(cellPointIds->GetId(j));
+	}
       }
-      if(mask->GetPixel(index) != 1) continue;
+
+      if(isInsideMask(pointNeighborIds, surface, mask, isRAS)) continue;
     }
     
     // Get field value at surface point and deform
     const ContinuousIndexType& cIndex =
-      TransformNDimsDoubleToContinuousIndex<VectorImageType>(warp, p0, convertFromRAS);
-    const VectorImageType::PixelType& disp = interpolator->EvaluateAtContinuousIndex(cIndex);
+      TransformNDimsDoubleToContinuousIndex<VectorImageType>(warp, p0, isRAS);
+    const TPixel<VectorImageType>& disp = interpolator->EvaluateAtContinuousIndex(cIndex);
     
     double p1[nDims] = {p0[0], p0[1], p0[2]};
     for(unsigned int d = 0; d < nDims; d++) {
-      p1[d] += (convertFromRAS) ? (rasShift[d] * disp[d]) : disp[d];
+      p1[d] -= (isRAS) ? (rasShift[d] * disp[d]) : disp[d];
     }
     surface->GetPoints()->SetPoint(p, p1);
   }

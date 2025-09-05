@@ -10,7 +10,6 @@
 
 #include "utils.h"
 
-using RegionType = itk::ImageRegion<nDims>;
 
 
 // Main class
@@ -19,23 +18,24 @@ class HighResCropFromReferenceMask {
   HighResCropFromReferenceMask();
 
   // Set params
-  void SetReferenceImage(UCharImageType::Pointer image) { this->m_ref = image; }
+  void SetReferenceImage(TPointer<UCharImageType> image) { this->m_ref = image; }
   void SetCropRegionBuffer(unsigned int buffer = 0) { this->m_buffer = buffer; }
   void SetResamplingFactor(float factor = 1.0 ) { this->m_resamplingFactor = factor; }
 
   // Get params
-  UCharImageType::IndexType GetStartIndex() const { return this->m_startIndex; }
-  UCharImageType::IndexType GetEndIndex() const { return this->m_endIndex; }
+  TIndex<UCharImageType> GetStartIndex() const { return this->m_startIndex; }
+  TIndex<UCharImageType> GetEndIndex() const { return this->m_endIndex; }
   
   // Member functions
   void FindCropRegion();
-  template <typename TImage> typename TImage::Pointer Apply(typename TImage::Pointer image);
-  template <typename TImage> typename TImage::Pointer Revert(typename TImage::Pointer image);
+  template <typename TImage> TPointer<TImage> Apply(TPointer<TImage> image);
+  template <typename TImage> TPointer<TImage> Downsample(TPointer<TImage> image);
+  template <typename TImage> TPointer<TImage> Revert(TPointer<TImage> image);
   
  private:
-  UCharImageType::Pointer m_ref;
-  UCharImageType::IndexType m_startIndex;
-  UCharImageType::IndexType m_endIndex;
+  TPointer<UCharImageType> m_ref;
+  TIndex<UCharImageType> m_startIndex;
+  TIndex<UCharImageType> m_endIndex;
   unsigned int m_buffer;
   float m_resamplingFactor;
 };
@@ -60,13 +60,9 @@ using PasteImageFilterType = itk::PasteImageFilter<TImage, TImage>;
 
 // Functions
 template <typename TImage>
-typename TImage::Pointer ResampleImage(typename TImage::Pointer image, double factor);
+TPointer<TImage> ResampleImage(TPointer<TImage> image, double factor);
 
 
 #endif
-
-
-
-
 
   
